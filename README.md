@@ -71,13 +71,25 @@ go run ./cmd/tavora workspace show      # CLI
 go run ./cmd/tavora-tui                 # TUI
 ```
 
-To work against a local checkout of the SDK:
+### Working against a local SDK checkout
+
+By default the build pulls `tavora-sdk-go` at its tagged version from
+the public registry. To iterate against unreleased SDK changes, add a
+local replace directive temporarily:
 
 ```sh
-# go.mod already has `replace github.com/tavora-ai/tavora-sdk-go => ../tavora-sdk-go`
-# so a sibling clone of tavora-sdk-go gets used automatically. Drop the replace
-# when releasing.
+# from tavora-tools/
+go mod edit -replace github.com/tavora-ai/tavora-sdk-go=../tavora-sdk-go
+go mod tidy
+# … iterate …
+# undo before commit:
+go mod edit -dropreplace github.com/tavora-ai/tavora-sdk-go
+go mod tidy
 ```
+
+Pre-tag, the replace was permanent (no published v0.x.y existed). Now
+that `v0.1.0+` ships, registry-resolved is the default and replace is
+opt-in for development.
 
 ## License
 

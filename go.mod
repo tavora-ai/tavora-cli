@@ -9,7 +9,7 @@ require (
 	github.com/chzyer/readline v1.5.1
 	github.com/muesli/reflow v0.3.0
 	github.com/spf13/cobra v1.8.1
-	github.com/tavora-ai/tavora-sdk-go v0.0.0
+	github.com/tavora-ai/tavora-sdk-go v0.1.0
 	google.golang.org/genai v1.55.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -53,5 +53,3 @@ require (
 	google.golang.org/grpc v1.66.2 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 )
-
-replace github.com/tavora-ai/tavora-sdk-go => ../tavora-sdk-go
