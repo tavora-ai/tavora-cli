@@ -90,6 +90,7 @@ func init() {
 	rootCmd.AddCommand(promotionsCmd)
 	rootCmd.AddCommand(schedulesCmd)
 	rootCmd.AddCommand(evalsCmd)
+	rootCmd.AddCommand(ragEvalCmd)
 	rootCmd.AddCommand(metricsCmd)
 	rootCmd.AddCommand(studioCmd)
 }
