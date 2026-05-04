@@ -1,6 +1,8 @@
 # Build output
 /bin/
 /dist/
+/tavora
+/tavora-tui
 /cmd/tavora/tavora
 /cmd/tavora-tui/tavora-tui
 
