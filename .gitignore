@@ -1,0 +1,18 @@
+# Build output
+/bin/
+/dist/
+/cmd/tavora/tavora
+/cmd/tavora-tui/tavora-tui
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Test artifacts
+*.out
+*.test
+coverage.html
+coverage.txt
