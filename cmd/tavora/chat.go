@@ -19,7 +19,7 @@ var (
 	chatModel        string
 	chatSystem       string
 	chatUseRAG       bool
-	chatStoreID string
+	chatIndexID string
 )
 
 var chatCompleteCmd = &cobra.Command{
@@ -43,8 +43,8 @@ var chatCompleteCmd = &cobra.Command{
 			Messages: messages,
 			UseRAG:   chatUseRAG,
 		}
-		if chatStoreID != "" {
-			input.StoreID = chatStoreID
+		if chatIndexID != "" {
+			input.IndexID = chatIndexID
 		}
 
 		result, err := client.ChatCompletion(cmd.Context(), input)
@@ -177,7 +177,7 @@ var conversationsGetCmd = &cobra.Command{
 
 var (
 	sendUseRAG       bool
-	sendStoreID string
+	sendIndexID string
 )
 
 var conversationsSendCmd = &cobra.Command{
@@ -192,8 +192,8 @@ var conversationsSendCmd = &cobra.Command{
 			Content: message,
 			UseRAG:  sendUseRAG,
 		}
-		if sendStoreID != "" {
-			input.StoreID = sendStoreID
+		if sendIndexID != "" {
+			input.IndexID = sendIndexID
 		}
 
 		result, err := client.SendMessage(cmd.Context(), convID, input)
@@ -234,7 +234,7 @@ var (
 	interactiveSystem       string
 	interactiveModel        string
 	interactiveUseRAG       bool
-	interactiveStoreID string
+	interactiveIndexID string
 )
 
 var chatInteractiveCmd = &cobra.Command{
@@ -259,8 +259,8 @@ var chatInteractiveCmd = &cobra.Command{
 				Content: input,
 				UseRAG:  interactiveUseRAG,
 			}
-			if interactiveStoreID != "" {
-				msgInput.StoreID = interactiveStoreID
+			if interactiveIndexID != "" {
+				msgInput.IndexID = interactiveIndexID
 			}
 
 			result, err := client.SendMessage(cmd.Context(), conv.ID, msgInput)
@@ -280,12 +280,12 @@ func init() {
 	chatCompleteCmd.Flags().StringVar(&chatModel, "model", "", "AI model (default: gemini-2.5-flash)")
 	chatCompleteCmd.Flags().StringVar(&chatSystem, "system", "", "System prompt")
 	chatCompleteCmd.Flags().BoolVar(&chatUseRAG, "rag", false, "Enable RAG from space documents")
-	chatCompleteCmd.Flags().StringVar(&chatStoreID, "store", "", "Limit RAG to store ID")
+	chatCompleteCmd.Flags().StringVar(&chatIndexID, "store", "", "Limit RAG to store ID")
 
 	chatInteractiveCmd.Flags().StringVar(&interactiveSystem, "system", "", "System prompt")
 	chatInteractiveCmd.Flags().StringVar(&interactiveModel, "model", "", "AI model")
 	chatInteractiveCmd.Flags().BoolVar(&interactiveUseRAG, "rag", false, "Enable RAG from space documents")
-	chatInteractiveCmd.Flags().StringVar(&interactiveStoreID, "store", "", "Limit RAG to store ID")
+	chatInteractiveCmd.Flags().StringVar(&interactiveIndexID, "store", "", "Limit RAG to store ID")
 
 	conversationsListCmd.Flags().IntVar(&convListLimit, "limit", 20, "Max conversations to return")
 
@@ -294,7 +294,7 @@ func init() {
 	conversationsCreateCmd.Flags().StringVar(&convCreateModel, "model", "", "AI model")
 
 	conversationsSendCmd.Flags().BoolVar(&sendUseRAG, "rag", false, "Enable RAG")
-	conversationsSendCmd.Flags().StringVar(&sendStoreID, "store", "", "Limit RAG to store ID")
+	conversationsSendCmd.Flags().StringVar(&sendIndexID, "store", "", "Limit RAG to store ID")
 
 	conversationsCmd.AddCommand(conversationsListCmd)
 	conversationsCmd.AddCommand(conversationsCreateCmd)

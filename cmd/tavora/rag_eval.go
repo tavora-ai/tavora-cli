@@ -89,8 +89,8 @@ func resolveTestdata(flagVal string) (string, error) {
 // createEvalStore creates a fresh store named with the mode + timestamp,
 // and registers cleanup if --cleanup is set. Returns the store and a
 // cleanup func the caller should defer.
-func createEvalStore(ctx context.Context, mode string, cleanup bool) (*tavora.Store, func(), error) {
-	store, err := client.CreateStore(ctx, tavora.CreateStoreInput{
+func createEvalStore(ctx context.Context, mode string, cleanup bool) (*tavora.Index, func(), error) {
+	store, err := client.CreateIndex(ctx, tavora.CreateIndexInput{
 		Name:        fmt.Sprintf("rag-eval-%s-%s", mode, time.Now().Format("20060102-150405")),
 		Description: "Created by `tavora rag-eval " + mode + "`",
 	})
@@ -101,7 +101,7 @@ func createEvalStore(ctx context.Context, mode string, cleanup bool) (*tavora.St
 	if cleanup {
 		cleanupFn = func() {
 			fmt.Fprintf(os.Stderr, "Cleaning up store %s...\n", store.ID)
-			if err := client.DeleteStore(context.Background(), store.ID); err != nil {
+			if err := client.DeleteIndex(context.Background(), store.ID); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: delete store: %v\n", err)
 			}
 		}
@@ -230,7 +230,7 @@ CI use:
 			for _, f := range files {
 				rec := ragFormatRecord{Format: spec.Label, Filename: filepath.Base(f)}
 				doc, upErr := client.UploadDocument(ctx, tavora.UploadDocumentInput{
-					FilePath: f, StoreID: store.ID,
+					FilePath: f, IndexID: store.ID,
 				})
 				if upErr != nil {
 					rec.Err = upErr.Error()
@@ -325,10 +325,10 @@ func sampleFormatFiles(dir string, exts []string, n int) ([]string, error) {
 // checkSearchable issues a search using the filename stem and accepts
 // a hit if any returned chunk is from this document. Same heuristic
 // the rag-eval-formats example used.
-func checkSearchable(ctx context.Context, storeID string, rec ragFormatRecord) bool {
+func checkSearchable(ctx context.Context, indexID string, rec ragFormatRecord) bool {
 	query := strings.ReplaceAll(strings.TrimSuffix(rec.Filename, filepath.Ext(rec.Filename)), "_", " ")
 	results, err := client.Search(ctx, tavora.SearchInput{
-		Query: query, StoreID: storeID, TopK: 5,
+		Query: query, IndexID: indexID, TopK: 5,
 	})
 	if err != nil {
 		return false
@@ -592,13 +592,13 @@ func loadRagCases(path string) ([]ragEvalCase, error) {
 	return cases, nil
 }
 
-func uploadJudgeCorpus(ctx context.Context, storeID, testdataPath string, cases []ragEvalCase, verbose bool) (map[string]string, error) {
+func uploadJudgeCorpus(ctx context.Context, indexID, testdataPath string, cases []ragEvalCase, verbose bool) (map[string]string, error) {
 	docByFile := map[string]string{}
 	var docIDs []string
 	for _, c := range cases {
 		abs := filepath.Join(testdataPath, c.File)
 		doc, err := client.UploadDocument(ctx, tavora.UploadDocumentInput{
-			FilePath: abs, StoreID: storeID,
+			FilePath: abs, IndexID: indexID,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  upload %s: %v\n", c.File, err)
@@ -622,10 +622,10 @@ func uploadJudgeCorpus(ctx context.Context, storeID, testdataPath string, cases 
 // askJudgeRAG queries the chat endpoint with RAG enabled against a
 // specific store. Single-turn — judge mode doesn't need conversation
 // memory, just a one-shot question/answer.
-func askJudgeRAG(ctx context.Context, storeID, question string) (string, error) {
+func askJudgeRAG(ctx context.Context, indexID, question string) (string, error) {
 	resp, err := client.ChatCompletion(ctx, tavora.ChatCompletionInput{
 		Messages: []tavora.ChatMessage{{Role: "user", Content: question}},
-		UseRAG:   true, StoreID: storeID,
+		UseRAG:   true, IndexID: indexID,
 	})
 	if err != nil {
 		return "", err

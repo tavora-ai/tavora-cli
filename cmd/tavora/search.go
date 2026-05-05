@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	searchStoreID string
+	searchIndexID string
 	searchTopK         int32
 	searchMinScore     float64
 )
@@ -26,7 +26,7 @@ var searchCmd = &cobra.Command{
 
 		results, err := client.Search(cmd.Context(), tavora.SearchInput{
 			Query:   query,
-			StoreID: searchStoreID,
+			IndexID: searchIndexID,
 			TopK:         searchTopK,
 			MinScore:     searchMinScore,
 		})
@@ -54,7 +54,7 @@ var searchCmd = &cobra.Command{
 }
 
 func init() {
-	searchCmd.Flags().StringVar(&searchStoreID, "store", "", "Filter by store ID")
+	searchCmd.Flags().StringVar(&searchIndexID, "store", "", "Filter by store ID")
 	searchCmd.Flags().Int32Var(&searchTopK, "top-k", 10, "Number of results")
 	searchCmd.Flags().Float64Var(&searchMinScore, "min-score", 0.3, "Minimum similarity score")
 }

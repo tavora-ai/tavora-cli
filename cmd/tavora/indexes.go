@@ -16,7 +16,7 @@ var storesListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all stores",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		stores, err := client.ListStores(cmd.Context())
+		stores, err := client.ListIndexes(cmd.Context())
 		if err != nil {
 			return err
 		}
@@ -47,7 +47,7 @@ var storesCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a store",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		store, err := client.CreateStore(cmd.Context(), tavora.CreateStoreInput{
+		store, err := client.CreateIndex(cmd.Context(), tavora.CreateIndexInput{
 			Name:        storeCreateName,
 			Description: storeCreateDesc,
 		})
@@ -69,7 +69,7 @@ var storesGetCmd = &cobra.Command{
 	Short: "Get a store by ID",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		store, err := client.GetStore(cmd.Context(), args[0])
+		store, err := client.GetIndex(cmd.Context(), args[0])
 		if err != nil {
 			return err
 		}
@@ -97,7 +97,7 @@ var storesUpdateCmd = &cobra.Command{
 	Short: "Update a store",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		store, err := client.UpdateStore(cmd.Context(), args[0], tavora.UpdateStoreInput{
+		store, err := client.UpdateIndex(cmd.Context(), args[0], tavora.UpdateIndexInput{
 			Name:        storeUpdateName,
 			Description: storeUpdateDesc,
 		})
@@ -119,7 +119,7 @@ var storesDeleteCmd = &cobra.Command{
 	Short: "Delete a store by ID",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := client.DeleteStore(cmd.Context(), args[0]); err != nil {
+		if err := client.DeleteIndex(cmd.Context(), args[0]); err != nil {
 			return err
 		}
 

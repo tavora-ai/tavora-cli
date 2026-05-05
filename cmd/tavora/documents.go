@@ -23,7 +23,7 @@ var documentsCmd = &cobra.Command{
 var (
 	docsLimit        int
 	docsOffset       int
-	docsStoreID string
+	docsIndexID string
 )
 
 var documentsListCmd = &cobra.Command{
@@ -33,7 +33,7 @@ var documentsListCmd = &cobra.Command{
 		result, err := client.ListDocuments(cmd.Context(), tavora.ListDocumentsInput{
 			Limit:   docsLimit,
 			Offset:  docsOffset,
-			StoreID: docsStoreID,
+			IndexID: docsIndexID,
 		})
 		if err != nil {
 			return err
@@ -92,7 +92,7 @@ var documentsGetCmd = &cobra.Command{
 	},
 }
 
-var uploadStoreID string
+var uploadIndexID string
 
 var documentsUploadCmd = &cobra.Command{
 	Use:   "upload [file-or-dir]",
@@ -145,7 +145,7 @@ Supported file types: .pdf, .md, .txt, .csv`,
 		for _, f := range files {
 			doc, err := client.UploadDocument(cmd.Context(), tavora.UploadDocumentInput{
 				FilePath:     f,
-				StoreID: uploadStoreID,
+				IndexID: uploadIndexID,
 			})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "  FAIL  %s: %v\n", filepath.Base(f), err)
@@ -171,7 +171,7 @@ Supported file types: .pdf, .md, .txt, .csv`,
 func uploadSingleFile(cmd *cobra.Command, path string) error {
 	doc, err := client.UploadDocument(cmd.Context(), tavora.UploadDocumentInput{
 		FilePath:     path,
-		StoreID: uploadStoreID,
+		IndexID: uploadIndexID,
 	})
 	if err != nil {
 		return err
@@ -254,9 +254,9 @@ var documentsDeleteCmd = &cobra.Command{
 func init() {
 	documentsListCmd.Flags().IntVar(&docsLimit, "limit", 50, "Max documents to return")
 	documentsListCmd.Flags().IntVar(&docsOffset, "offset", 0, "Offset for pagination")
-	documentsListCmd.Flags().StringVar(&docsStoreID, "store", "", "Filter by store ID")
+	documentsListCmd.Flags().StringVar(&docsIndexID, "store", "", "Filter by store ID")
 
-	documentsUploadCmd.Flags().StringVar(&uploadStoreID, "store", "", "Assign to store ID")
+	documentsUploadCmd.Flags().StringVar(&uploadIndexID, "store", "", "Assign to store ID")
 
 	documentsWaitCmd.Flags().DurationVar(&waitTimeout, "timeout", 60*time.Second, "Max time to wait")
 	documentsWaitCmd.Flags().DurationVar(&waitInterval, "interval", 2*time.Second, "Poll interval")

@@ -50,7 +50,7 @@ type mainModel struct {
 
 	// Lazy cache of the agent active version's stores_json so /upload
 	// without an explicit store doesn't re-fetch the version each time.
-	agentStoreIDsCache []string
+	agentIndexIDsCache []string
 	agentStoresCached  bool
 
 	// Shell-style prompt history. history holds previously-sent prompts
@@ -397,14 +397,14 @@ func (m *mainModel) handleUpload(rest string) tea.Cmd {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	storeID, err := m.resolveStoreForUpload(ctx, storeArg)
+	indexID, err := m.resolveStoreForUpload(ctx, storeArg)
 	if err != nil {
 		m.appendError(err.Error())
 		return nil
 	}
 
-	m.appendSystem(fmt.Sprintf("Uploading %s → store %s ...", path, storeID))
-	return uploadCmd(m.client, storeID, path)
+	m.appendSystem(fmt.Sprintf("Uploading %s → store %s ...", path, indexID))
+	return uploadCmd(m.client, indexID, path)
 }
 
 // pushHistory records a sent prompt and resets the browse cursor so

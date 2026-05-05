@@ -36,7 +36,7 @@ type uploadResultMsg struct {
 // place. Better to make the user say which.
 func (m *mainModel) resolveStoreForUpload(ctx context.Context, explicit string) (string, error) {
 	if explicit != "" {
-		stores, err := m.client.ListStores(ctx)
+		stores, err := m.client.ListIndexes(ctx)
 		if err != nil {
 			return "", fmt.Errorf("listing stores: %w", err)
 		}
@@ -57,7 +57,7 @@ func (m *mainModel) resolveStoreForUpload(ctx context.Context, explicit string) 
 		return "", fmt.Errorf("/upload without an explicit store needs an agent — pass `--agent` at startup")
 	}
 
-	stores, err := m.agentStoreIDs(ctx)
+	stores, err := m.agentIndexIDs(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -71,12 +71,12 @@ func (m *mainModel) resolveStoreForUpload(ctx context.Context, explicit string) 
 	}
 }
 
-// agentStoreIDs lazily fetches the active version's stores_json and
+// agentIndexIDs lazily fetches the active version's stores_json and
 // caches the parsed list. The version is immutable, so caching is safe
 // for the lifetime of the TUI session.
-func (m *mainModel) agentStoreIDs(ctx context.Context) ([]string, error) {
+func (m *mainModel) agentIndexIDs(ctx context.Context) ([]string, error) {
 	if m.agentStoresCached {
-		return m.agentStoreIDsCache, nil
+		return m.agentIndexIDsCache, nil
 	}
 	if m.agent == nil || m.agent.ActiveVersionID == nil {
 		return nil, fmt.Errorf("no active version on agent %q", m.agent.Name)
@@ -91,20 +91,20 @@ func (m *mainModel) agentStoreIDs(ctx context.Context) ([]string, error) {
 			return nil, fmt.Errorf("parsing stores_json: %w", err)
 		}
 	}
-	m.agentStoreIDsCache = ids
+	m.agentIndexIDsCache = ids
 	m.agentStoresCached = true
 	return ids, nil
 }
 
 // uploadCmd performs the actual upload off the UI thread. The result
 // comes back as uploadResultMsg and is rendered as a system message.
-func uploadCmd(client *tavora.Client, storeID, path string) tea.Cmd {
+func uploadCmd(client *tavora.Client, indexID, path string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		doc, err := client.UploadDocument(ctx, tavora.UploadDocumentInput{
 			FilePath: path,
-			StoreID:  storeID,
+			IndexID:  indexID,
 		})
 		return uploadResultMsg{doc: doc, err: err}
 	}
