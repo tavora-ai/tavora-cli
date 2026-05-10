@@ -237,7 +237,7 @@ var evalsSeedCmd = &cobra.Command{
 	Use:   "seed",
 	Short: "Create sample eval cases (no-op if cases already exist)",
 	Long: `Create a small set of sample eval cases so you have something real to gate
-on. Idempotent: if the workspace already has any eval cases, the command
+on. Idempotent: if the product already has any eval cases, the command
 prints how many it found and exits without mutating state.
 
 Intended for first-time setup of a CI eval job — run once locally, then

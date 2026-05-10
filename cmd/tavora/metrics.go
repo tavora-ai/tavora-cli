@@ -8,7 +8,7 @@ import (
 
 var metricsCmd = &cobra.Command{
 	Use:   "metrics",
-	Short: "Show space-level metrics dashboard",
+	Short: "Show product-level metrics dashboard",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		m, err := client.GetMetrics(cmd.Context())
 		if err != nil {

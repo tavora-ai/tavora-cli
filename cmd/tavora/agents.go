@@ -143,7 +143,7 @@ var agentsRunCmd = &cobra.Command{
 
 var agentsPromptCmd = &cobra.Command{
 	Use:   "prompt",
-	Short: "Show the full agent system prompt for this space",
+	Short: "Show the full agent system prompt for this product",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		prompt, err := client.GetAgentSystemPrompt(cmd.Context())
 		if err != nil {

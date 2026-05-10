@@ -18,7 +18,7 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "tavora",
 	Short: "Tavora CLI — developer client for the Tavora API",
-	Long: `Tavora CLI lets you interact with your Tavora space from the terminal.
+	Long: `Tavora CLI lets you interact with your Tavora product from the terminal.
 
 Authenticate with an API key (flag, env var, or config file) to manage
 stores, upload documents, search, chat, and run agents.
@@ -78,7 +78,7 @@ func init() {
 
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(initCmd)
-	rootCmd.AddCommand(workspaceCmd)
+	rootCmd.AddCommand(productCmd)
 	rootCmd.AddCommand(storesCmd)
 	rootCmd.AddCommand(documentsCmd)
 	rootCmd.AddCommand(searchCmd)

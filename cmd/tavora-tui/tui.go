@@ -30,7 +30,7 @@ import (
 // stays responsive while the agent is reasoning.
 type mainModel struct {
 	client  *tavora.Client
-	ws      *tavora.Workspace
+	ws      *tavora.Product
 	agent   *tavora.AgentConfig // nil when resuming a session by ID
 	session *tavora.AgentSession
 	logPath string
@@ -71,7 +71,7 @@ type sessionStartedMsg struct {
 	err     error
 }
 
-func newMainModel(client *tavora.Client, ws *tavora.Workspace, logPath string, resume *tavora.AgentSession, agent *tavora.AgentConfig) mainModel {
+func newMainModel(client *tavora.Client, ws *tavora.Product, logPath string, resume *tavora.AgentSession, agent *tavora.AgentConfig) mainModel {
 	in := textinput.New()
 	in.Placeholder = "Ask anything. /help for commands."
 	in.Prompt = "› "
@@ -480,7 +480,7 @@ func (m mainModel) View() string {
 }
 
 func (m mainModel) headerView() string {
-	left := fmt.Sprintf("workspace: %s", m.ws.Name)
+	left := fmt.Sprintf("product: %s", m.ws.Name)
 	right := "agent-tui"
 	if m.session != nil {
 		right = "session: " + m.session.ID[:min(8, len(m.session.ID))]

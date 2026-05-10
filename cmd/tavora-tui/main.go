@@ -1,7 +1,7 @@
 // Agent TUI — an interactive terminal UI for talking to a Tavora agent.
 //
 // First run captures TAVORA_URL and TAVORA_API_KEY through a setup
-// screen, validates them by calling GetWorkspace, and persists the
+// screen, validates them by calling GetProduct, and persists the
 // result under the user's config dir. Subsequent runs go straight to
 // the chat surface: scrolling output on top, prompt input on the
 // bottom, live SSE streaming of tool calls / JS execution / responses.
@@ -62,7 +62,7 @@ func run(logPath string) error {
 	var (
 		resetConfig = flag.Bool("reset-config", false, "ignore stored config and rerun setup")
 		sessionID   = flag.String("session", "", "resume an existing agent session by ID instead of creating a new one")
-		agentFlag   = flag.String("agent", "", "agent ID or name to bind to (auto-picks if exactly one agent in workspace; interactive picker otherwise)")
+		agentFlag   = flag.String("agent", "", "agent ID or name to bind to (auto-picks if exactly one agent in product; interactive picker otherwise)")
 	)
 	flag.Parse()
 
@@ -127,11 +127,11 @@ func printResumeHint(session *tavora.AgentSession) {
 //   - TAVORA_URL + TAVORA_API_KEY env vars → validate, never persist
 //   - stored config file → validate, fall through to setup on failure
 //   - setup TUI → captures URL + key, validates, persists
-func acquireConfig(forceSetup bool) (*Config, *tavora.Workspace, error) {
+func acquireConfig(forceSetup bool) (*Config, *tavora.Product, error) {
 	if !forceSetup {
 		if env := EnvConfig(); env != nil {
 			if ws, err := validate(env); err == nil {
-				slog.Info("connected via env credentials", "workspace", ws.Name)
+				slog.Info("connected via env credentials", "product", ws.Name)
 				return env, ws, nil
 			} else {
 				slog.Warn("env credentials rejected; falling back to setup", "err", err)
@@ -139,7 +139,7 @@ func acquireConfig(forceSetup bool) (*Config, *tavora.Workspace, error) {
 		}
 		if cfg, err := LoadConfig(); err == nil {
 			if ws, err := validate(cfg); err == nil {
-				slog.Info("connected via stored credentials", "workspace", ws.Name)
+				slog.Info("connected via stored credentials", "product", ws.Name)
 				return cfg, ws, nil
 			} else {
 				slog.Warn("stored credentials rejected; rerunning setup", "err", err)
@@ -160,9 +160,9 @@ func acquireConfig(forceSetup bool) (*Config, *tavora.Workspace, error) {
 	return sm.cfg, sm.ws, nil
 }
 
-func validate(cfg *Config) (*tavora.Workspace, error) {
+func validate(cfg *Config) (*tavora.Product, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return tavora.NewClient(cfg.URL, cfg.APIKey).GetWorkspace(ctx)
+	return tavora.NewClient(cfg.URL, cfg.APIKey).GetProduct(ctx)
 }
 
