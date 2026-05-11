@@ -15,8 +15,8 @@ import (
 )
 
 // setupModel runs a small two-field form (URL, API key) and validates
-// the credentials by calling GetProduct before persisting them. It
-// reports the resulting Config + Product back to the caller via
+// the credentials by calling GetApp before persisting them. It
+// reports the resulting Config + App back to the caller via
 // program-level messages so main.go can hand off into mainModel.
 
 type setupStep int
@@ -35,7 +35,7 @@ type setupModel struct {
 	spin    spinner.Model
 	err     error
 	cfg     *Config
-	ws      *tavora.Product
+	ws      *tavora.App
 	width   int
 	height  int
 	exiting bool
@@ -43,7 +43,7 @@ type setupModel struct {
 
 type setupValidatedMsg struct {
 	cfg *Config
-	ws  *tavora.Product
+	ws  *tavora.App
 }
 
 type setupErrorMsg struct{ err error }
@@ -51,7 +51,7 @@ type setupErrorMsg struct{ err error }
 // SetupResult is what main.go receives once the setup TUI quits.
 type SetupResult struct {
 	Cfg *Config
-	WS  *tavora.Product
+	WS  *tavora.App
 }
 
 func newSetupModel(seed *Config) setupModel {
@@ -185,12 +185,12 @@ func validateCmd(cfg *Config) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		client := tavora.NewClient(cfg.URL, cfg.APIKey)
-		ws, err := client.GetProduct(ctx)
+		ws, err := client.GetApp(ctx)
 		if err != nil {
 			slog.Warn("setup validation failed", "url", cfg.URL, "err", err)
 			return setupErrorMsg{err: err}
 		}
-		slog.Info("setup validated", "url", cfg.URL, "product", ws.Name)
+		slog.Info("setup validated", "url", cfg.URL, "app", ws.Name)
 		return setupValidatedMsg{cfg: cfg, ws: ws}
 	}
 }
@@ -211,7 +211,7 @@ func (m setupModel) View() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Tavora — Agent TUI"))
 	b.WriteString("\n")
-	b.WriteString(subtleStyle.Render("Connect to a product. The API key scopes everything you do."))
+	b.WriteString(subtleStyle.Render("Connect to an app. The API key scopes everything you do."))
 	b.WriteString("\n\n")
 
 	switch m.step {
@@ -227,7 +227,7 @@ func (m setupModel) View() string {
 		b.WriteString(m.spin.View())
 		b.WriteString(" validating credentials...")
 	case stepDone:
-		b.WriteString(fmt.Sprintf("Connected to product: %s", m.ws.Name))
+		b.WriteString(fmt.Sprintf("Connected to app: %s", m.ws.Name))
 	}
 
 	if m.err != nil {

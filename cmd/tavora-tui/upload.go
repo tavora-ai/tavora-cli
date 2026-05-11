@@ -24,7 +24,7 @@ type uploadResultMsg struct {
 //
 // Resolution order:
 //   1. If the user typed `/upload <path> <store>`, look it up by ID
-//      first, then by name (case-insensitive) within the product's
+//      first, then by name (case-insensitive) within the app's
 //      stores list.
 //   2. Otherwise, fetch the active version once and cache its
 //      stores_json. If exactly one store is bound, use it. If zero or

@@ -9,7 +9,7 @@ require (
 	github.com/chzyer/readline v1.5.1
 	github.com/muesli/reflow v0.3.0
 	github.com/spf13/cobra v1.10.2
-	github.com/tavora-ai/tavora-sdk-go v0.2.0
+	github.com/tavora-ai/tavora-sdk-go v0.2.1
 	google.golang.org/genai v1.55.0
 	gopkg.in/yaml.v3 v3.0.1
 )

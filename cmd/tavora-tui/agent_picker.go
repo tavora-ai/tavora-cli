@@ -35,19 +35,19 @@ func resolveAgent(ctx context.Context, client *tavora.Client, flag string) (*tav
 		return nil, fmt.Errorf("listing agents: %w", err)
 	}
 	if len(agents) == 0 {
-		// "Product always has a default agent" is a platform invariant
-		// the backend owns (auto-provisioning on product create). If
-		// you hit this error, the product was created via a path that
+		// "App always has a default agent" is a platform invariant
+		// the backend owns (auto-provisioning on app create). If
+		// you hit this error, the app was created via a path that
 		// bypasses signup's SeedStarter — fix in CLI:
-		//   tavora product seed
+		//   tavora app seed
 		// rather than bootstrapping inline from the TUI.
-		return nil, fmt.Errorf("no agents in this product — run `tavora product seed` to provision the default agent, or use the admin UI")
+		return nil, fmt.Errorf("no agents in this app — run `tavora app seed` to provision the default agent, or use the admin UI")
 	}
 
 	if flag != "" {
 		match := findAgent(agents, flag)
 		if match == nil {
-			return nil, fmt.Errorf("no agent matched %q in this product (try `tavora agents list`)", flag)
+			return nil, fmt.Errorf("no agent matched %q in this app (try `tavora agents list`)", flag)
 		}
 		return ensureActiveVersion(match)
 	}

@@ -7,7 +7,7 @@ execution, sandbox events, the final response) stream into the
 viewport live.
 
 The TUI is intentionally narrow in scope: it talks to an agent that
-already exists in the product. Persona, tools, skills, and store
+already exists in the app. Persona, tools, skills, and store
 bindings come from the agent's active version — the TUI doesn't author
 or edit any of those. Skill upload, agent CRUD, and dashboard-style
 observation live in the `tavora` CLI / admin UI.
@@ -34,10 +34,10 @@ anything is saved. On success the credentials persist to:
 - Linux:  `$XDG_CONFIG_HOME/tavora/agent-tui.json` (or `~/.config/tavora/...`)
 - Override: `TAVORA_TUI_CONFIG=/path/to/file`
 
-API keys are product-scoped by construction. After credentials, the
+API keys are app-scoped by construction. After credentials, the
 TUI picks an agent:
 
-- If the product has exactly one agent → auto-select.
+- If the app has exactly one agent → auto-select.
 - If 2+ agents → interactive picker (filter with `/`).
 - If 0 agents → error pointing you at `tavora agents create <name>`.
 - `--agent <id-or-name>` skips the picker.

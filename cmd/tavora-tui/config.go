@@ -9,7 +9,7 @@ import (
 )
 
 // Config holds the persisted credentials the TUI needs to connect to a
-// Tavora product. The API key is product-scoped — there is nothing
+// Tavora app. The API key is app-scoped — there is nothing
 // else to "select" once it is supplied.
 type Config struct {
 	URL    string `json:"url"`

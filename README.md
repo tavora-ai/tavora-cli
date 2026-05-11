@@ -5,14 +5,14 @@ platform. Two binaries, one module:
 
 | Binary | Purpose |
 |---|---|
-| [`tavora`](./cmd/tavora) | The user CLI — manage products, agents, skills, documents, MCP servers, evals, schedules, and more from your terminal |
+| [`tavora`](./cmd/tavora) | The user CLI — manage apps, agents, skills, documents, MCP servers, evals, schedules, and more from your terminal |
 | [`tavora-tui`](./cmd/tavora-tui) | An interactive terminal UI for chatting with a configured Tavora agent — Claude-Code-style |
 
 Both depend on the public Go SDK [`tavora-sdk-go`](https://github.com/tavora-ai/tavora-sdk-go).
 
 ## Why a separate repo
 
-The tools live here, not in the closed-source product repo, because:
+The tools live here, not in the closed-source app repo, because:
 
 1. **Public surface coherence.** External customers see one library
    ([`tavora-sdk-go`](https://github.com/tavora-ai/tavora-sdk-go)) and
@@ -46,7 +46,7 @@ after first interactive setup.
 export TAVORA_URL=https://api.tavora.ai
 export TAVORA_API_KEY=tvr_...
 
-tavora product show
+tavora app show
 tavora agents list
 tavora-tui
 ```
@@ -67,7 +67,7 @@ tavora-tools/
 ```sh
 go build ./...                          # build both
 go test ./...                           # run tests
-go run ./cmd/tavora product show      # CLI
+go run ./cmd/tavora app show      # CLI
 go run ./cmd/tavora-tui                 # TUI
 ```
 
