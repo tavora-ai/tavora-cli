@@ -162,69 +162,11 @@ var agentVersionsSetActiveCmd = &cobra.Command{
 	},
 }
 
-// --- deployments ---
-
-var agentDeploymentsCmd = &cobra.Command{
-	Use:   "deployments",
-	Short: "Manage agent deployments (version → target bindings)",
-}
-
-var agentDeploymentsListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List deployments for an agent config",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		deps, err := client.ListAgentDeployments(cmd.Context(), agentVersionsAgentID)
-		if err != nil {
-			return err
-		}
-		if isJSON() {
-			return printJSON(deps)
-		}
-		if len(deps) == 0 {
-			fmt.Println("No deployments.")
-			return nil
-		}
-		t := newTable("ID", "VERSION", "TARGET", "STATUS", "DEPLOYED_AT")
-		for _, d := range deps {
-			target := d.TargetType
-			if d.TargetRef != "" {
-				target = d.TargetType + ":" + d.TargetRef
-			}
-			t.row(d.ID, d.VersionID, target, d.Status, d.DeployedAt.Format("2006-01-02 15:04"))
-		}
-		return t.flush()
-	},
-}
-
-var (
-	deployVersionID  string
-	deployTargetType string
-	deployTargetRef  string
-)
-
-var agentDeploymentsUpsertCmd = &cobra.Command{
-	Use:   "upsert",
-	Short: "Pin a version at a target (idempotent)",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		dep, err := client.UpsertAgentDeployment(cmd.Context(), agentVersionsAgentID, tavora.UpsertDeploymentInput{
-			VersionID:  deployVersionID,
-			TargetType: deployTargetType,
-			TargetRef:  deployTargetRef,
-		})
-		if err != nil {
-			return err
-		}
-		if isJSON() {
-			return printJSON(dep)
-		}
-		target := dep.TargetType
-		if dep.TargetRef != "" {
-			target = dep.TargetType + ":" + dep.TargetRef
-		}
-		fmt.Printf("Deployed version %s at %s (status: %s)\n", dep.VersionID, target, dep.Status)
-		return nil
-	},
-}
+// The legacy `agents deployments` subcommand was removed when Phase
+// 12 (eval-gated promotion) was dismantled in the MVP slim-down —
+// the deployment model collapsed back to a single active version per
+// agent. The new code-first `tavora deploy` verb (see codefirst.go)
+// is the canonical promotion path.
 
 func splitCSV(s string) []string {
 	var out []string
@@ -244,11 +186,8 @@ func splitCSV(s string) []string {
 }
 
 func init() {
-	// Shared agent-config id flag on all four commands.
-	for _, c := range []*cobra.Command{agentVersionsCmd, agentDeploymentsCmd} {
-		c.PersistentFlags().StringVar(&agentVersionsAgentID, "agent", "", "Agent config UUID (required)")
-		_ = c.MarkPersistentFlagRequired("agent")
-	}
+	agentVersionsCmd.PersistentFlags().StringVar(&agentVersionsAgentID, "agent", "", "Agent config UUID (required)")
+	_ = agentVersionsCmd.MarkPersistentFlagRequired("agent")
 
 	agentVersionsListCmd.Flags().IntVar(&agentVersionsLimit, "limit", 50, "Max versions to return")
 
@@ -262,19 +201,10 @@ func init() {
 	agentVersionsCreateCmd.Flags().StringVar(&versionCreateSkillsJSON, "skills", "", `JSON array of {skill_id, version} bindings`)
 	agentVersionsCreateCmd.Flags().StringVar(&versionCreateStoresCSV, "stores", "", "Comma-separated knowledge store UUIDs")
 
-	agentDeploymentsUpsertCmd.Flags().StringVar(&deployVersionID, "version-id", "", "Version UUID to pin (required)")
-	agentDeploymentsUpsertCmd.Flags().StringVar(&deployTargetType, "target-type", "api", "Target kind (api, channel_binding, …)")
-	agentDeploymentsUpsertCmd.Flags().StringVar(&deployTargetRef, "target-ref", "", "Target-specific identifier")
-	agentDeploymentsUpsertCmd.MarkFlagRequired("version-id")
-
 	agentVersionsCmd.AddCommand(agentVersionsListCmd)
 	agentVersionsCmd.AddCommand(agentVersionsGetCmd)
 	agentVersionsCmd.AddCommand(agentVersionsCreateCmd)
 	agentVersionsCmd.AddCommand(agentVersionsSetActiveCmd)
 
-	agentDeploymentsCmd.AddCommand(agentDeploymentsListCmd)
-	agentDeploymentsCmd.AddCommand(agentDeploymentsUpsertCmd)
-
 	agentsCmd.AddCommand(agentVersionsCmd)
-	agentsCmd.AddCommand(agentDeploymentsCmd)
 }

@@ -20,20 +20,44 @@ var rootCmd = &cobra.Command{
 	Short: "Tavora CLI — developer client for the Tavora API",
 	Long: `Tavora CLI lets you interact with your Tavora app from the terminal.
 
-Authenticate with an API key (flag, env var, or config file) to manage
-stores, upload documents, search, chat, and run agents.
+Two workflows live here:
+
+  Code-first authoring — author agents as files in a tavora/ folder
+    tavora init      scaffold tavora/ with a starter agent
+    tavora dev       watch + validate + sync a dev draft
+    tavora deploy    promote the draft to a published version
+    tavora config show <agent>   print resolved config
+
+  API client — manage stores, documents, sessions, evals against
+  your hosted Tavora app via X-API-Key auth.
 
 Configuration precedence (highest to lowest):
   1. Command-line flags (--api-key, --url)
   2. Environment variables (TAVORA_API_KEY, TAVORA_URL)
   3. Config file (~/.tavora.yaml or TAVORA_CONFIG)
 
-Run 'tavora init' to create a config file interactively.`,
+Run 'tavora login' to write credentials to the config file.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Skip client init for commands that don't need it
-		if cmd.Name() == "help" || cmd.Name() == "completion" || cmd.Name() == "init" || cmd.Name() == "version" {
+		// Skip client init for commands that don't need it. The
+		// code-first verbs (init, dev with --no-sync, deploy with
+		// --dry-run, config show) can run against the local
+		// filesystem alone.
+		switch cmd.Name() {
+		case "help", "completion", "version":
+			return nil
+		case "init", "login", "show", "dev", "deploy":
+			return nil
+		case "session", "latest":
+			// `tavora session …` reads from local disk only — no
+			// API key required. `latest` is the subcommand name.
+			return nil
+		}
+		// `tavora session get <id>` and `… list` also run offline;
+		// detect them by parent rather than name to avoid colliding
+		// with other CLIs that have unrelated `get`/`list` verbs.
+		if cmd.Parent() != nil && cmd.Parent().Name() == "session" {
 			return nil
 		}
 
@@ -77,7 +101,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "Config file path (default: ~/.tavora.yaml)")
 
 	rootCmd.AddCommand(versionCmd)
-	rootCmd.AddCommand(initCmd)
+	rootCmd.AddCommand(loginCmd)
 	rootCmd.AddCommand(appCmd)
 	rootCmd.AddCommand(storesCmd)
 	rootCmd.AddCommand(documentsCmd)
@@ -87,7 +111,6 @@ func init() {
 	rootCmd.AddCommand(skillsCmd)
 	rootCmd.AddCommand(templatesCmd)
 	rootCmd.AddCommand(mcpCmd)
-	rootCmd.AddCommand(promotionsCmd)
 	rootCmd.AddCommand(schedulesCmd)
 	rootCmd.AddCommand(evalsCmd)
 	rootCmd.AddCommand(ragEvalCmd)

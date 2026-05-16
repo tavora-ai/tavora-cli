@@ -52,9 +52,13 @@ func loadConfigFile() *configFile {
 	return &cfg
 }
 
-var initCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Interactive setup — configure API key and server URL",
+// loginCmd was previously bound to `tavora init`; renamed when the
+// code-first verbs took over `init` for project scaffolding. The
+// behavior — interactively write ~/.tavora.yaml with API key + URL —
+// is unchanged.
+var loginCmd = &cobra.Command{
+	Use:   "login",
+	Short: "Interactive credential setup — configure API key and server URL",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reader := bufio.NewReader(os.Stdin)
 
