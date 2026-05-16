@@ -76,14 +76,20 @@ func Plan(opt Options) []File {
   ],
 
   // Indexes are referenced by name; ingestion lives in the UI/CLI.
-  "indexes": []
+  "indexes": [],
 
-  // MCP servers, schedules, and eval cases are managed via the
-  // imperative API for v0 (tavora mcp / tavora schedules /
-  // tavora evals). They were previously fields here, but the
-  // server didn't write them through to operational tables, so
-  // they were stripped to keep "what you write is what runs"
-  // honest.
+  // Eval cases live alongside the agent as JSON files. Each case
+  // is {name?, input, criteria, pass_threshold?}; the server
+  // upserts them at sync time and pins this agent's suite to the
+  // resulting set. Run them via tavora-evals or from the UI.
+  "evals": [
+    "./evals/*.json"
+  ]
+
+  // MCP servers and schedules are still managed via the imperative
+  // API for v0 (tavora mcp / tavora schedules). They were
+  // previously fields here too, but the server didn't write them
+  // through; they'll return once the wire-through lands.
 }
 `
 
@@ -130,6 +136,15 @@ When a customer asks for a refund:
 3. Otherwise, explain the policy and offer store credit.
 `
 
+	happyEval := `{
+  "$schema": "https://docs.tavora.ai/schemas/evalcase.schema.json",
+  "name": "refund-happy-path",
+  "input": "Can I refund order #12345?",
+  "criteria": "Response mentions the 30-day refund window and explains the policy clearly.",
+  "pass_threshold": 7
+}
+`
+
 	gitignore := `# Tavora session logs — regenerated on every dev-draft invocation.
 # Studio keeps the full server-side history; the local copy is just
 # for AI coding tools that read from disk.
@@ -160,11 +175,13 @@ tavora/
   tavora.jsonc                          # project manifest
   agents/
     <agent-id>/
-      agent.jsonc                       # model, capabilities, skill + index bindings
+      agent.jsonc                       # model, capabilities, skill + index + eval bindings
       persona.md                        # system prompt
       skills/
         <name>.js                       # module skill — require()'d from the JS thinking-core
         <name>.md                       # prompt skill — concatenated into the system prompt
+      evals/
+        <case>.json                     # eval cases ({name?, input, criteria, pass_threshold?})
   .runs/                                # auto-generated session logs (gitignored)
 %[2]s
 
@@ -195,9 +212,10 @@ draft.
   don't rename it casually (use %[1]stavora rename%[1]s). Fields:
   %[1]smodel%[1]s, %[1]scapabilities%[1]s (search/fetch/ai/memory/indexes/require/
   remember), %[1]sskills%[1]s (file paths or globs), %[1]sindexes%[1]s (referenced
-  by name; ingestion stays in the UI). MCP servers, schedules, and
-  eval cases are NOT here for v0 — manage them via the imperative
-  API (%[1]stavora mcp%[1]s / %[1]stavora schedules%[1]s / %[1]stavora evals%[1]s).
+  by name; ingestion stays in the UI), %[1]sevals%[1]s (file paths or globs;
+  upserted at sync time and pinned as this agent's suite). MCP
+  servers and schedules are NOT here for v0 — manage them via
+  %[1]stavora mcp%[1]s / %[1]stavora schedules%[1]s.
 - **persona.md** — the system prompt. Plain markdown; the runtime
   passes it verbatim to the model.
 - **skills/*.js** — module skill. CommonJS-shaped: %[1]smodule.exports
@@ -205,6 +223,11 @@ draft.
   %[1]srequire()%[1]s's these modules to compose tasks.
 - **skills/*.md** — prompt skill. Concatenated into the system
   prompt at session start. Good for policies and reference text.
+- **evals/*.json** — eval cases. One per file with %[1]s{name?, input,
+  criteria, pass_threshold?}%[1]s. Source-sync upserts them under the
+  agent's suite (%[1]s__cf__/<agent-id>%[1]s namespace); the resulting
+  suite is auto-pinned to the agent so %[1]stavora evals run%[1]s and the
+  Evaluate tab find them.
 
 ## Editing tips for AI coding tools
 
@@ -253,6 +276,7 @@ published versions share %[1]sagent_versions%[1]s with a %[1]skind%[1]s column).
 		{"agents/support/persona.md", persona},
 		{"agents/support/skills/order-status.js", orderSkill},
 		{"agents/support/skills/refund-policy.md", refundSkill},
+		{"agents/support/evals/happy-path.json", happyEval},
 		{".gitignore", gitignore},
 	}
 }

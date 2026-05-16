@@ -344,6 +344,7 @@ type resolvedAgent struct {
 	Persona      string          `json:"persona,omitempty"`
 	Skills       []resolvedSkill `json:"skills"`
 	Indexes      []string        `json:"indexes,omitempty"`
+	Evals        []string        `json:"evals,omitempty"`
 }
 
 type resolvedSkill struct {
@@ -361,6 +362,10 @@ func resolveForDisplay(a *source.Agent) resolvedAgent {
 			Binding: s.BindingRaw,
 		})
 	}
+	evals := make([]string, 0, len(a.Evals))
+	for _, e := range a.Evals {
+		evals = append(evals, e.RelPath)
+	}
 	out := resolvedAgent{
 		ID:           a.Config.ID,
 		Name:         a.Config.Name,
@@ -369,6 +374,7 @@ func resolveForDisplay(a *source.Agent) resolvedAgent {
 		Persona:      a.Persona,
 		Skills:       skills,
 		Indexes:      a.Config.Indexes,
+		Evals:        evals,
 	}
 	return out
 }
