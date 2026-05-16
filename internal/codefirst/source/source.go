@@ -58,7 +58,6 @@ type Agent struct {
 	Config     AgentConfig // raw parsed config
 	Persona    string      // resolved persona markdown contents
 	Skills     []Skill
-	Evals      []Eval
 
 	// SourceBytes keeps the raw bytes of every file the agent
 	// pulls in, keyed by repo-relative path. The CLI hashes this
@@ -67,6 +66,16 @@ type Agent struct {
 }
 
 // AgentConfig mirrors agent.jsonc.
+//
+// v0 scope: config covers identity (id/name/persona), model selection,
+// skills (file paths/globs), capabilities (sandbox allowlist), and
+// index references. The previously-recognized mcp/schedules/evals/
+// deploy stanzas were stripped on 2026-05-16 — they were parsed but
+// the server ignored them, which let edits look effective without
+// actually changing anything. For v0 those features stay on the
+// imperative API (tavora mcp, tavora schedules, tavora evals,
+// tavora agent_versions); they may return to agent.jsonc once the
+// server writes them through to operational tables.
 type AgentConfig struct {
 	Schema       string            `json:"$schema,omitempty"`
 	ID           string            `json:"id"`
@@ -75,33 +84,13 @@ type AgentConfig struct {
 	Persona      string            `json:"persona,omitempty"`
 	Capabilities []string          `json:"capabilities,omitempty"`
 	Skills       []string          `json:"skills,omitempty"`
-	MCP          []MCPServer       `json:"mcp,omitempty"`
 	Indexes      []string          `json:"indexes,omitempty"`
-	Evals        []string          `json:"evals,omitempty"`
-	Schedules    []ScheduleEntry   `json:"schedules,omitempty"`
-	Deploy       *DeployOptions    `json:"deploy,omitempty"`
 	Env          map[string]string `json:"env,omitempty"`
 }
 
 type ModelRef struct {
 	Provider string `json:"provider"`
 	Name     string `json:"name"`
-}
-
-type MCPServer struct {
-	Name      string `json:"name"`
-	Endpoint  string `json:"endpoint"`
-	SecretRef string `json:"secretRef,omitempty"`
-}
-
-type ScheduleEntry struct {
-	Name  string `json:"name"`
-	Cron  string `json:"cron"`
-	Input string `json:"input"`
-}
-
-type DeployOptions struct {
-	RunEvals bool `json:"runEvals,omitempty"`
 }
 
 // Skill is a resolved skill file — either a .js module skill or a
@@ -119,12 +108,6 @@ const (
 	SkillModule SkillKind = "module"
 	SkillPrompt SkillKind = "prompt"
 )
-
-// Eval is a resolved eval JSON file.
-type Eval struct {
-	Path    string
-	RelPath string
-}
 
 // Issue is a load-time problem the CLI wants to surface to the user
 // with file/line context (line is 0 if unknown).
@@ -367,40 +350,6 @@ func loadAgent(root, agentConfigPath string) (*Agent, []Issue) {
 				Path:       m,
 				RelPath:    relTo(root, m),
 			})
-			a.SourceBytes[relTo(root, m)] = b
-		}
-	}
-
-	// Evals (globs allowed)
-	for _, binding := range cfg.Evals {
-		matches, err := resolveGlob(dir, binding)
-		if err != nil {
-			issues = append(issues, Issue{
-				File:    relTo(root, agentConfigPath),
-				Code:    "invalid-eval-glob",
-				Message: fmt.Sprintf("invalid eval pattern %q: %s", binding, err),
-			})
-			continue
-		}
-		if len(matches) == 0 {
-			issues = append(issues, Issue{
-				File:    relTo(root, agentConfigPath),
-				Code:    "missing-eval-file",
-				Message: fmt.Sprintf("eval binding %q matches no files", binding),
-			})
-			continue
-		}
-		for _, m := range matches {
-			b, err := os.ReadFile(m)
-			if err != nil {
-				issues = append(issues, Issue{
-					File:    relTo(root, agentConfigPath),
-					Code:    "read-eval-file",
-					Message: err.Error(),
-				})
-				continue
-			}
-			a.Evals = append(a.Evals, Eval{Path: m, RelPath: relTo(root, m)})
 			a.SourceBytes[relTo(root, m)] = b
 		}
 	}

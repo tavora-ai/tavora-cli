@@ -337,17 +337,13 @@ func printResolvedAgent(a *source.Agent) error {
 // includes the parsed config plus the resolved skill paths and
 // kinds so an AI tool can confirm "yes, my new skill is bound".
 type resolvedAgent struct {
-	ID           string                  `json:"id"`
-	Name         string                  `json:"name"`
-	Model        source.ModelRef         `json:"model"`
-	Capabilities []string                `json:"capabilities,omitempty"`
-	Persona      string                  `json:"persona,omitempty"`
-	Skills       []resolvedSkill         `json:"skills"`
-	MCP          []source.MCPServer      `json:"mcp,omitempty"`
-	Indexes      []string                `json:"indexes,omitempty"`
-	Evals        []string                `json:"evals,omitempty"`
-	Schedules    []source.ScheduleEntry  `json:"schedules,omitempty"`
-	Deploy       *source.DeployOptions   `json:"deploy,omitempty"`
+	ID           string          `json:"id"`
+	Name         string          `json:"name"`
+	Model        source.ModelRef `json:"model"`
+	Capabilities []string        `json:"capabilities,omitempty"`
+	Persona      string          `json:"persona,omitempty"`
+	Skills       []resolvedSkill `json:"skills"`
+	Indexes      []string        `json:"indexes,omitempty"`
 }
 
 type resolvedSkill struct {
@@ -365,10 +361,6 @@ func resolveForDisplay(a *source.Agent) resolvedAgent {
 			Binding: s.BindingRaw,
 		})
 	}
-	evals := make([]string, 0, len(a.Evals))
-	for _, e := range a.Evals {
-		evals = append(evals, e.RelPath)
-	}
 	out := resolvedAgent{
 		ID:           a.Config.ID,
 		Name:         a.Config.Name,
@@ -376,11 +368,7 @@ func resolveForDisplay(a *source.Agent) resolvedAgent {
 		Capabilities: a.Config.Capabilities,
 		Persona:      a.Persona,
 		Skills:       skills,
-		MCP:          a.Config.MCP,
 		Indexes:      a.Config.Indexes,
-		Evals:        evals,
-		Schedules:    a.Config.Schedules,
-		Deploy:       a.Config.Deploy,
 	}
 	return out
 }

@@ -119,28 +119,11 @@ func checkAgent(p *source.Project, a *source.Agent) []Issue {
 		}
 	}
 
-	// MCP entries need an endpoint and a name.
-	for i, srv := range a.Config.MCP {
-		if srv.Name == "" {
-			out = append(out, fatal(rel, "mcp-missing-name",
-				fmt.Sprintf("mcp[%d] is missing \"name\"", i),
-				`add "name": "<unique-identifier>"`))
-		}
-		if srv.Endpoint == "" {
-			out = append(out, fatal(rel, "mcp-missing-endpoint",
-				fmt.Sprintf("mcp[%d] is missing \"endpoint\"", i),
-				`use ${VAR} for environment values — they resolve server-side`))
-		}
-	}
-
-	// Schedules need a cron expression and a name.
-	for i, s := range a.Config.Schedules {
-		if s.Cron == "" {
-			out = append(out, fatal(rel, "schedule-missing-cron",
-				fmt.Sprintf("schedules[%d] is missing \"cron\"", i),
-				`use 5-field cron syntax: "0 3 * * *" runs at 03:00 daily`))
-		}
-	}
+	// mcp/schedules/evals validators were dropped on 2026-05-16: those
+	// stanzas were parsed by the CLI but ignored by the server, so the
+	// fields plus their validators have left agent.jsonc for v0. The
+	// imperative API (tavora mcp / tavora schedules / tavora evals)
+	// still manages those resources.
 
 	return out
 }

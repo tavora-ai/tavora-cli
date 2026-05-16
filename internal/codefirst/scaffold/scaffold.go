@@ -75,22 +75,15 @@ func Plan(opt Options) []File {
     "./skills/refund-policy.md"
   ],
 
-  // MCP servers are connection config, not files. Endpoint and
-  // secret refs resolve server-side from your environment store.
-  "mcp": [],
-
   // Indexes are referenced by name; ingestion lives in the UI/CLI.
-  "indexes": [],
+  "indexes": []
 
-  "evals": [
-    "./evals/*.json"
-  ],
-
-  "schedules": [],
-
-  "deploy": {
-    "runEvals": true
-  }
+  // MCP servers, schedules, and eval cases are managed via the
+  // imperative API for v0 (tavora mcp / tavora schedules /
+  // tavora evals). They were previously fields here, but the
+  // server didn't write them through to operational tables, so
+  // they were stripped to keep "what you write is what runs"
+  // honest.
 }
 `
 
@@ -137,18 +130,6 @@ When a customer asks for a refund:
 3. Otherwise, explain the policy and offer store credit.
 `
 
-	happyEval := `{
-  "name": "refund-happy-path",
-  "input": "Can I refund order #12345?",
-  "expectations": [
-    {
-      "kind": "contains",
-      "value": "30-day"
-    }
-  ]
-}
-`
-
 	gitignore := `# Tavora session logs — regenerated on every dev-draft invocation.
 # Studio keeps the full server-side history; the local copy is just
 # for AI coding tools that read from disk.
@@ -184,8 +165,6 @@ tavora/
       skills/
         <name>.js                       # module skill — require()'d from the JS thinking-core
         <name>.md                       # prompt skill — concatenated into the system prompt
-      evals/
-        <case>.json                     # eval cases (one per file or glob)
   .runs/                                # auto-generated session logs (gitignored)
 %[2]s
 
@@ -213,12 +192,12 @@ draft.
   commas; the schema URL gives IDE autocomplete.
 - **agent.jsonc** — one per agent folder. %[1]sid%[1]s is the stable local
   identifier the server maps to its own agent UUID on first sync;
-  don't rename it casually (use %[1]stavora rename%[1]s when it ships).
+  don't rename it casually (use %[1]stavora rename%[1]s). Fields:
   %[1]smodel%[1]s, %[1]scapabilities%[1]s (search/fetch/ai/memory/indexes/require/
-  remember), %[1]sskills%[1]s (file paths or globs), %[1]smcp%[1]s (server endpoint
-  + secretRef — values resolve server-side), %[1]sindexes%[1]s (referenced
-  by name; ingestion stays in the UI), %[1]sevals%[1]s (glob), %[1]sschedules%[1]s
-  (cron + input).
+  remember), %[1]sskills%[1]s (file paths or globs), %[1]sindexes%[1]s (referenced
+  by name; ingestion stays in the UI). MCP servers, schedules, and
+  eval cases are NOT here for v0 — manage them via the imperative
+  API (%[1]stavora mcp%[1]s / %[1]stavora schedules%[1]s / %[1]stavora evals%[1]s).
 - **persona.md** — the system prompt. Plain markdown; the runtime
   passes it verbatim to the model.
 - **skills/*.js** — module skill. CommonJS-shaped: %[1]smodule.exports
@@ -226,9 +205,6 @@ draft.
   %[1]srequire()%[1]s's these modules to compose tasks.
 - **skills/*.md** — prompt skill. Concatenated into the system
   prompt at session start. Good for policies and reference text.
-- **evals/*.json** — TDD for agents. Each case has %[1]sinput%[1]s + a list
-  of %[1]sexpectations%[1]s. %[1]stavora deploy%[1]s can gate on these via
-  %[1]sagent.jsonc → deploy.runEvals%[1]s.
 
 ## Editing tips for AI coding tools
 
@@ -249,8 +225,8 @@ Other useful facts:
 - Errors include a file path, an issue %[1]scode%[1]s tag, a one-line
   message, and a %[1]shint:%[1]s line pointing at the concrete fix.
 - Secrets and environment values: never write them to files.
-  Use %[1]s${VAR_NAME}%[1]s in agent.jsonc / mcp.endpoint / etc.; they
-  resolve server-side from the dev environment's store.
+  Use %[1]s${VAR_NAME}%[1]s in agent.jsonc; values resolve server-side
+  from the dev environment's store.
 - %[1]s.runs/%[1]s retention defaults to the most recent 50 files;
   override via %[1]stavora.jsonc → retention.runs%[1]s. Studio keeps the
   full server-side history.
@@ -277,7 +253,6 @@ published versions share %[1]sagent_versions%[1]s with a %[1]skind%[1]s column).
 		{"agents/support/persona.md", persona},
 		{"agents/support/skills/order-status.js", orderSkill},
 		{"agents/support/skills/refund-policy.md", refundSkill},
-		{"agents/support/evals/happy-path.json", happyEval},
 		{".gitignore", gitignore},
 	}
 }
