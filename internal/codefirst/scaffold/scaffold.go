@@ -42,7 +42,7 @@ func Plan(opt Options) []File {
 	manifest := fmt.Sprintf(`{
   // Tavora code-first project manifest.
   // Docs: https://docs.tavora.ai/code-first/manifest
-  "$schema": "https://schemas.tavora.ai/project.schema.json",
+  "$schema": "https://docs.tavora.ai/schemas/project.schema.json",
   "project": %q,
 %s  "agents": {
     "discover": "agents/*/agent.jsonc"
@@ -57,7 +57,7 @@ func Plan(opt Options) []File {
 	agent := `{
   // The "support" starter agent. Edit me — or copy this folder and
   // start a second agent next to it.
-  "$schema": "https://schemas.tavora.ai/agent.schema.json",
+  "$schema": "https://docs.tavora.ai/schemas/agent.schema.json",
   "id": "support",
   "name": "Support",
   "model": {
