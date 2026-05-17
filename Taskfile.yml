@@ -71,9 +71,14 @@ tasks:
       - goreleaser check
 
   release:snapshot:
-    desc: Local snapshot build (no tag, no upload) — artifacts land in ./dist
+    desc: Local snapshot build (no tag needed, fake version) — artifacts in ./dist
     cmds:
       - goreleaser release --snapshot --clean
+
+  release:dry:
+    desc: Dry-run against the current tag (real version, no upload) — artifacts in ./dist
+    cmds:
+      - goreleaser release --skip=announce,publish,validate --clean
 
   # ---------- run from source ----------
 
