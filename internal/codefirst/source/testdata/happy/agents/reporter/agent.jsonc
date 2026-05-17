@@ -1,0 +1,9 @@
+{
+  "id": "reporter",
+  "name": "Weekly Reporter",
+  "model": { "provider": "gemini", "name": "gemini-2.5-pro" },
+  "persona": "./persona.md",
+  "capabilities": ["ai", "asset"],
+  "skills": ["./skills/now/"],
+  "evals": ["./evals/*.json"]
+}

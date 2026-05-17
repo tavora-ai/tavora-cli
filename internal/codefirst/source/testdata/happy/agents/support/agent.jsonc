@@ -1,0 +1,12 @@
+{
+  "id": "support",
+  "name": "Support Bot",
+  "model": { "provider": "gemini", "name": "gemini-2.5-flash" },
+  "persona": "./persona.md",
+  "capabilities": ["search", "fetch", "ai"],
+  "skills": [
+    "./skills/order-status/",
+    "./skills/style/"
+  ],
+  "evals": ["./evals/*.json"]
+}

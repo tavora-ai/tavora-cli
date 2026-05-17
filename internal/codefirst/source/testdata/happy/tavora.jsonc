@@ -1,0 +1,7 @@
+{
+  // Happy-path fixture: two agents, a mix of skill shapes
+  // (module + prompt + module-only), a couple of evals.
+  "project": "happy-fixture",
+  "agents": { "discover": "agents/*/agent.jsonc" },
+  "retention": { "runs": 25 }
+}

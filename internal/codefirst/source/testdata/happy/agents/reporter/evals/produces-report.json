@@ -1,0 +1,5 @@
+{
+  "input": "Summarise this week's PRs",
+  "criteria": "Returns a one-page markdown summary with sections and dates.",
+  "pass_threshold": 6
+}

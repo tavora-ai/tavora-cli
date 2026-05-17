@@ -1,0 +1,6 @@
+{
+  "name": "responds-to-greeting",
+  "input": "Hello — can you help?",
+  "criteria": "Brief, polite acknowledgement that offers help.",
+  "pass_threshold": 7
+}

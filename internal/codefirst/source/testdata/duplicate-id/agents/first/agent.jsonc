@@ -1,0 +1,5 @@
+{
+  "id": "shared",
+  "name": "First",
+  "model": { "provider": "gemini", "name": "gemini-2.5-flash" }
+}
