@@ -1,0 +1,36 @@
+# `tavora init` should scaffold the documented file set under
+# ./tavora/. Without TAVORA_API_KEY set (the testscript Setup
+# explicitly clears it), init falls back to the directory-name
+# project slug and skips the cloud bind — no API calls are made,
+# so this script doesn't depend on the fake backend's behavior at
+# all. Good for catching:
+#   - rename of any starter file (scaffold.Plan list drift)
+#   - regression in --project flag handling
+#   - .gitignore drift (sneaky; only one line covers .runs/)
+
+tavora init --project demo
+
+# Every file the scaffolder advertises in scaffold.Plan should exist.
+exists tavora/tavora.jsonc
+exists tavora/AGENTS.md
+exists tavora/.gitignore
+exists tavora/agents/starter/agent.jsonc
+exists tavora/agents/starter/persona.md
+exists tavora/agents/starter/skills/now/skill.md
+exists tavora/agents/starter/skills/now/main.js
+exists tavora/agents/starter/skills/style/skill.md
+exists tavora/agents/starter/evals/basic.json
+
+# Manifest must carry the project name we asked for, not the
+# directory-name fallback or a stale default.
+grep '"project": "demo"' tavora/tavora.jsonc
+
+# Run again with no --force — second run must be a no-op (existing
+# files preserved), exit clean.
+tavora init --project demo
+stderr 'no files written'
+
+# --force re-writes; we don't assert on file content (already
+# covered above), just that the exit is clean and no error fires.
+tavora init --project demo --force
+! stderr 'error:'

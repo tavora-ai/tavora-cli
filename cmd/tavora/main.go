@@ -115,10 +115,21 @@ func init() {
 }
 
 func main() {
+	os.Exit(run())
+}
+
+// run is the int-returning entry point. main() wraps it so the
+// process exits cleanly; cli_test.go's testscript runner wraps it
+// so each scripted `tavora ...` invocation runs the binary with
+// fresh global state (cobra's package-level flag vars survive
+// across rootCmd.Execute calls, so reusing the binary in-process
+// would leak --output / --api-key etc. between scripts).
+func run() int {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", wrapError(err))
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 // tryGetProjectSlug calls GET /api/sdk/project to look up the slug of the

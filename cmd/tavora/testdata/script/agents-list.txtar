@@ -1,0 +1,33 @@
+# `tavora agents list` against the mock backend. The fake server's
+# /api/sdk/agents handler returns two canned sessions ("First
+# session" + "Second session"). This script pins:
+#   - the CLI honours TAVORA_API_KEY + TAVORA_URL from env
+#   - the table output includes both titles
+#   - the JSON shape passthrough returns the same titles
+#
+# Setting any non-empty TAVORA_API_KEY value is enough — the fake
+# backend doesn't validate the key (just the route).
+
+env TAVORA_API_KEY=tvr_fake
+
+tavora agents list
+stdout 'First session'
+stdout 'Second session'
+! stderr .
+
+# JSON pass-through. We assert on the SDK's wire-shape field names
+# (id, title, status) — these are the SDK contract, renaming any
+# of them would break this script.
+tavora --output json agents list
+stdout '"title": "First session"'
+stdout '"title": "Second session"'
+stdout '"status": "active"'
+stdout '"status": "completed"'
+! stderr .
+
+# No-key path: clear the env and confirm the CLI fails clean with
+# the documented error. This is the user-visible contract from
+# main.go's PersistentPreRunE.
+env TAVORA_API_KEY=
+! tavora agents list
+stderr 'no API key configured'

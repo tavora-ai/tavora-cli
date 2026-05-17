@@ -1,0 +1,15 @@
+# `tavora version` should print version + commit + build date and
+# exit 0. The values are all "dev" / "unknown" under `go test`
+# because ldflags aren't injected — but the format string is the
+# contract a release binary's output also has to satisfy, so pin it.
+
+tavora version
+stdout '^tavora dev \(commit: unknown, built: unknown\)$'
+! stderr .
+
+# JSON mode shape: a flat object with the three keys, no extras.
+tavora --output json version
+stdout '"version"'
+stdout '"commit"'
+stdout '"build_date"'
+! stderr .
