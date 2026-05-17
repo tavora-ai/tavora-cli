@@ -1,0 +1,129 @@
+# goreleaser config for tavora-cli.
+#
+# Single binary (`tavora`) — the TUI is the `tavora tui` subcommand,
+# not a separate binary. Targets the four common host shapes; CGO
+# stays off so `go install`-equivalent users get the same artifact
+# they would build locally.
+#
+# Cut a release:
+#   git tag v0.1.0
+#   git push --tags
+#   # GitHub Action (release.yml) runs `goreleaser release` and uploads.
+#
+# Local smoke test (no tag, no upload):
+#   goreleaser release --snapshot --clean
+#
+# Homebrew tap is wired up but disabled by default — uncomment the
+# `brews:` block and create a `homebrew-tap` repo under tavora-ai
+# when you want auto-PRs of the formula.
+
+version: 2
+
+project_name: tavora-cli
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: tavora
+    main: ./cmd/tavora
+    binary: tavora
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    # Reproducible-ish builds: stripped symbols + injected version
+    # info matching the existing `tavora version` ldflag contract
+    # in cmd/tavora/version.go.
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
+
+archives:
+  - id: tavora
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^test:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Features
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: Fixes
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: Other
+      order: 999
+
+release:
+  github:
+    owner: tavora-ai
+    name: tavora-cli
+  draft: false
+  prerelease: auto
+  # Hold the announcement message close to the changelog above —
+  # GoReleaser default is fine; override here if marketing wants a
+  # different shape later.
+  header: |
+    `tavora` CLI {{ .Tag }} — release notes below.
+
+    Install: download the archive for your OS/arch from the assets,
+    or `brew install tavora-ai/tap/tavora` once the Homebrew tap is
+    published.
+
+# Uncomment when the `tavora-ai/homebrew-tap` repo exists and you've
+# added a HOMEBREW_TAP_GITHUB_TOKEN secret with `repo` scope on it.
+#
+# brews:
+#   - name: tavora
+#     repository:
+#       owner: tavora-ai
+#       name: homebrew-tap
+#       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+#     directory: Formula
+#     homepage: "https://tavora.ai"
+#     description: "Tavora CLI — code-first agent authoring + TUI"
+#     license: "Apache-2.0"
+#     test: |
+#       system "#{bin}/tavora version"
+#     install: |
+#       bin.install "tavora"

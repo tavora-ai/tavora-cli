@@ -2,9 +2,7 @@
 /bin/
 /dist/
 /tavora
-/tavora-tui
 /cmd/tavora/tavora
-/cmd/tavora-tui/tavora-tui
 
 # Editor / OS
 .DS_Store

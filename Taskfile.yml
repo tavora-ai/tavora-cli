@@ -61,6 +61,19 @@ tasks:
     desc: Remove locally built binaries
     cmds:
       - rm -f tavora
+      - rm -rf dist
+
+  # ---------- release ----------
+
+  release:check:
+    desc: Lint the goreleaser config without building
+    cmds:
+      - goreleaser check
+
+  release:snapshot:
+    desc: Local snapshot build (no tag, no upload) — artifacts land in ./dist
+    cmds:
+      - goreleaser release --snapshot --clean
 
   # ---------- run from source ----------
 
