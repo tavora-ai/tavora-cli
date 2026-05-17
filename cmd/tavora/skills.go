@@ -3,16 +3,18 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
-	tavora "github.com/tavora-ai/tavora-sdk-go"
 )
 
+// tavora skills — inspection only. Authoring lives in
+// tavora/agents/<id>/skills/<name>.js (plus the matching .md prompt)
+// and rolls in via `tavora dev`. The previous `create` and `delete`
+// subcommands were removed 2026-05-17 alongside the SDK skill-write
+// surface; the skills table now has one writer (source-sync).
 var skillsCmd = &cobra.Command{
 	Use:   "skills",
-	Short: "Manage custom skills (tools)",
+	Short: "Inspect skills deployed to the current app",
 }
 
 var skillsListCmd = &cobra.Command{
@@ -29,7 +31,7 @@ var skillsListCmd = &cobra.Command{
 		}
 
 		if len(skills) == 0 {
-			fmt.Println("No skills found.")
+			fmt.Println("No skills found. Add tavora/agents/<id>/skills/<name>.js then run `tavora dev`.")
 			return nil
 		}
 
@@ -38,63 +40,6 @@ var skillsListCmd = &cobra.Command{
 			t.row(s.ID, s.Name, s.Type, fmt.Sprintf("%v", s.Enabled), s.CreatedAt.Format("2006-01-02"))
 		}
 		return t.flush()
-	},
-}
-
-var (
-	skillCreateName     string
-	skillCreateDesc     string
-	skillCreateType     string
-	skillCreateProm     string
-	skillCreateFromFile string
-)
-
-var skillsCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a skill (use --from-file <path.js> to upload a module skill)",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		name := skillCreateName
-		prompt := skillCreateProm
-		typ := skillCreateType
-
-		if skillCreateFromFile != "" {
-			body, err := os.ReadFile(skillCreateFromFile)
-			if err != nil {
-				return fmt.Errorf("read --from-file %q: %w", skillCreateFromFile, err)
-			}
-			prompt = string(body)
-			// --from-file defaults to a module skill (the JS-source-becomes-
-			// require()-able-function shape). Caller can override with --type.
-			if !cmd.Flags().Changed("type") {
-				typ = "module"
-			}
-			if name == "" {
-				base := filepath.Base(skillCreateFromFile)
-				base = strings.TrimSuffix(base, filepath.Ext(base))
-				name = base
-			}
-		}
-
-		if name == "" {
-			return fmt.Errorf("--name is required (or supply --from-file to derive it)")
-		}
-
-		skill, err := client.CreateSkill(cmd.Context(), tavora.CreateSkillInput{
-			Name:        name,
-			Description: skillCreateDesc,
-			Type:        typ,
-			Prompt:      prompt,
-		})
-		if err != nil {
-			return err
-		}
-
-		if isJSON() {
-			return printJSON(skill)
-		}
-
-		fmt.Printf("Created skill: %s (%s)\n", skill.Name, skill.ID)
-		return nil
 	},
 }
 
@@ -148,36 +93,10 @@ var skillsGetCmd = &cobra.Command{
 	},
 }
 
-var skillsDeleteCmd = &cobra.Command{
-	Use:   "delete [id]",
-	Short: "Delete a skill by ID",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := client.DeleteSkill(cmd.Context(), args[0]); err != nil {
-			return err
-		}
-
-		if isJSON() {
-			return printJSON(map[string]string{"status": "deleted"})
-		}
-
-		fmt.Println("Skill deleted.")
-		return nil
-	},
-}
-
 func init() {
-	skillsCreateCmd.Flags().StringVar(&skillCreateName, "name", "", "Skill name (defaults to filename when --from-file is set)")
-	skillsCreateCmd.Flags().StringVar(&skillCreateDesc, "description", "", "Skill description")
-	skillsCreateCmd.Flags().StringVar(&skillCreateType, "type", "prompt", "Skill type (prompt, webhook, module)")
-	skillsCreateCmd.Flags().StringVar(&skillCreateProm, "prompt", "", "Skill prompt template (or JS source for module skills)")
-	skillsCreateCmd.Flags().StringVar(&skillCreateFromFile, "from-file", "", "Upload a JS module skill from a file path. Defaults --type to 'module' and --name to the basename.")
-
 	skillsAuthoringGuideCmd.Flags().StringVarP(&skillAuthoringGuideOut, "output", "o", "", "Write the guide to this file instead of stdout")
 
 	skillsCmd.AddCommand(skillsListCmd)
-	skillsCmd.AddCommand(skillsCreateCmd)
 	skillsCmd.AddCommand(skillsGetCmd)
-	skillsCmd.AddCommand(skillsDeleteCmd)
 	skillsCmd.AddCommand(skillsAuthoringGuideCmd)
 }

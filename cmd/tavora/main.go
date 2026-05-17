@@ -110,7 +110,6 @@ func init() {
 	rootCmd.AddCommand(agentsCmd)
 	rootCmd.AddCommand(skillsCmd)
 	rootCmd.AddCommand(templatesCmd)
-	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(schedulesCmd)
 	rootCmd.AddCommand(evalsCmd)
 	rootCmd.AddCommand(ragEvalCmd)

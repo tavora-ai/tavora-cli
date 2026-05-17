@@ -11,9 +11,32 @@ import (
 	tavora "github.com/tavora-ai/tavora-sdk-go"
 )
 
+// tavora evals — cases and suites are authored in
+// tavora/agents/<id>/evals/*.json and roll in via `tavora dev`.
+// CRUD subcommands were retired 2026-05-17 to leave source-sync as
+// the single writer for those tables.
+//
+// The verbs that remain are operational, not authoring:
+//
+//   tavora evals list                       — show cases (read)
+//   tavora evals run <agent>                — trigger an eval run
+//                                             against the agent's
+//                                             pinned suite (the
+//                                             deployed persona)
+//   tavora evals run <agent> --wait         — block until done
+//   tavora evals run <agent> --gate         — exit non-zero on
+//                                             any failed case (CI)
+//   tavora evals latest <agent>             — show the most recent
+//                                             run + per-case results
+//   tavora evals runs list                  — recent runs (all suites)
+//   tavora evals runs get <id>              — single run + results
+//
+// `<agent>` is the local id from agent.jsonc (e.g. "support") OR
+// the server UUID. The resolver looks at code_first_local_id first
+// so the CLI plays nicely with the folder shape.
 var evalsCmd = &cobra.Command{
 	Use:   "evals",
-	Short: "Manage eval test cases and runs",
+	Short: "Trigger eval runs and inspect cases / run history",
 }
 
 var evalsListCmd = &cobra.Command{
@@ -30,7 +53,7 @@ var evalsListCmd = &cobra.Command{
 		}
 
 		if len(cases) == 0 {
-			fmt.Println("No eval cases found.")
+			fmt.Println("No eval cases found. Add tavora/agents/<id>/evals/<name>.json then run `tavora dev`.")
 			return nil
 		}
 
@@ -42,256 +65,9 @@ var evalsListCmd = &cobra.Command{
 	},
 }
 
-var (
-	evalCreateName      string
-	evalCreateDesc      string
-	evalCreateSet       string
-	evalCreatePrompt    string
-	evalCreateCriteria  string
-	evalCreateSystem    string
-	evalCreateThreshold int32
-)
-
-var evalsCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create an eval test case",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		input := tavora.CreateEvalCaseInput{
-			Name:        evalCreateName,
-			Description: evalCreateDesc,
-			SetName:     evalCreateSet,
-			Prompt:      evalCreatePrompt,
-			Criteria:    evalCreateCriteria,
-			SystemPrompt: evalCreateSystem,
-		}
-		if evalCreateThreshold > 0 {
-			input.PassThreshold = &evalCreateThreshold
-		}
-
-		ec, err := client.CreateEvalCase(cmd.Context(), input)
-		if err != nil {
-			return err
-		}
-
-		if isJSON() {
-			return printJSON(ec)
-		}
-
-		fmt.Printf("Created eval case: %s (%s)\n", ec.Name, ec.ID)
-		return nil
-	},
-}
-
-var evalsDeleteCmd = &cobra.Command{
-	Use:   "delete [id]",
-	Short: "Delete an eval test case",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := client.DeleteEvalCase(cmd.Context(), args[0]); err != nil {
-			return err
-		}
-
-		if isJSON() {
-			return printJSON(map[string]string{"status": "deleted"})
-		}
-
-		fmt.Println("Eval case deleted.")
-		return nil
-	},
-}
-
-// --- Eval Runs ---
-
-var (
-	evalRunSet     string
-	evalRunJudge   string
-	evalRunWait    bool
-	evalRunGate    bool
-	evalRunTimeout time.Duration
-)
-
-var evalsRunCmd = &cobra.Command{
-	Use:   "run",
-	Short: "Run the eval suite (use --wait for completion, --gate for CI exit codes)",
-	Long: `Trigger an eval run.
-
-By default, fires the run and exits — useful when you want to inspect the
-result later via 'tavora evals runs get <id>'.
-
-For CI pipelines that need to gate on agent quality:
-
-    tavora evals run --gate --timeout 10m
-
---gate implies --wait; the command polls until completion, prints a results
-table, and exits non-zero if any case fails. Suitable for use as the last
-step of a 'eval' job in GitHub Actions / GitLab CI / etc.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// --gate is shorthand for --wait + exit-on-failure.
-		wait := evalRunWait || evalRunGate
-
-		run, err := client.RunEval(cmd.Context(), tavora.RunEvalInput{
-			SetFilter:  evalRunSet,
-			JudgeModel: evalRunJudge,
-		})
-		if err != nil {
-			return err
-		}
-
-		if !wait {
-			if isJSON() {
-				return printJSON(run)
-			}
-			fmt.Printf("Eval run started: %s\n", run.ID)
-			fmt.Printf("  Status: %s\n", run.Status)
-			fmt.Printf("  Cases:  %d\n", run.TotalCases)
-			fmt.Println()
-			fmt.Printf("Re-run with --wait or --gate to block until completion.\n")
-			return nil
-		}
-
-		fmt.Fprintf(os.Stderr, "Eval run %s started, waiting for completion", run.ID)
-		detail, err := pollEvalRun(cmd.Context(), run.ID, evalRunTimeout)
-		fmt.Fprintln(os.Stderr)
-		if err != nil {
-			return err
-		}
-
-		if isJSON() {
-			if err := printJSON(detail); err != nil {
-				return err
-			}
-		} else {
-			printEvalResults(detail)
-		}
-
-		// Gate behavior: any failed case → non-zero exit. The error
-		// message goes to stderr (visible in CI logs); cobra's RunE
-		// translates the error to exit code 1 automatically.
-		if evalRunGate && detail.Run.Failed > 0 {
-			return fmt.Errorf("eval gate failed: %d/%d cases did not pass", detail.Run.Failed, detail.Run.TotalCases)
-		}
-		return nil
-	},
-}
-
-// pollEvalRun blocks until the run reaches a terminal state or timeout.
-// Prints a dot per poll to stderr so CI logs show progress without being
-// noisy. Returns the final EvalRunDetail.
-func pollEvalRun(ctx context.Context, runID string, timeout time.Duration) (*tavora.EvalRunDetail, error) {
-	if timeout <= 0 {
-		timeout = 5 * time.Minute
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		detail, err := client.GetEvalRun(ctx, runID)
-		if err != nil {
-			return nil, fmt.Errorf("polling eval run: %w", err)
-		}
-
-		switch detail.Run.Status {
-		case "completed":
-			return detail, nil
-		case "failed":
-			return detail, fmt.Errorf("eval run failed (server-side error, not a failed case — check the run detail)")
-		}
-
-		fmt.Fprint(os.Stderr, ".")
-
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("timed out after %s waiting for eval run to complete", timeout)
-		case <-ticker.C:
-		}
-	}
-}
-
-// printEvalResults renders the per-case table + summary the same shape
-// the legacy examples/eval-ci binary printed, so CI users porting from
-// it get a familiar log format.
-func printEvalResults(detail *tavora.EvalRunDetail) {
-	fmt.Fprintf(os.Stderr, "\nRun: %s | Status: %s\n\n", detail.Run.ID, detail.Run.Status)
-
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "CASE\tSCORE\tPASS\tDURATION")
-	fmt.Fprintln(w, "----\t-----\t----\t--------")
-
-	for _, r := range detail.Results {
-		pass := "FAIL"
-		if r.Pass {
-			pass = "PASS"
-		}
-		fmt.Fprintf(w, "%s\t%d/10\t%s\t%dms\n", r.CaseName, r.Score, pass, r.DurationMs)
-	}
-	_ = w.Flush()
-
-	fmt.Fprintf(os.Stderr, "\nPassed: %d/%d | Average Score: %.1f/10\n",
-		detail.Run.Passed, detail.Run.TotalCases, detail.Run.AverageScore)
-}
-
-var evalsSeedCmd = &cobra.Command{
-	Use:   "seed",
-	Short: "Create sample eval cases (no-op if cases already exist)",
-	Long: `Create a small set of sample eval cases so you have something real to gate
-on. Idempotent: if the app already has any eval cases, the command
-prints how many it found and exits without mutating state.
-
-Intended for first-time setup of a CI eval job — run once locally, then
-delete or replace with cases that exercise your actual agent.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := cmd.Context()
-		existing, err := client.ListEvalCases(ctx)
-		if err != nil {
-			return err
-		}
-		if len(existing) > 0 {
-			fmt.Printf("Found %d existing eval cases — no changes made.\n", len(existing))
-			return nil
-		}
-
-		samples := []tavora.CreateEvalCaseInput{
-			{
-				Name:     "basic-search",
-				SetName:  "ci",
-				Prompt:   "Search for documents in the knowledge base and summarize what you find.",
-				Criteria: "Must use the search tool at least once and provide a coherent summary of results. If no documents exist, should clearly state that.",
-				Tools:    []string{"search", "list_stores"},
-			},
-			{
-				Name:     "memory-usage",
-				SetName:  "ci",
-				Prompt:   "Remember that the project deadline is next Friday, then recall it.",
-				Criteria: "Must use the remember tool to store information and the recall tool to retrieve it. The recalled information should match what was stored.",
-				Tools:    []string{"remember", "recall", "memories"},
-			},
-		}
-
-		created := make([]tavora.EvalCase, 0, len(samples))
-		for _, s := range samples {
-			ec, err := client.CreateEvalCase(ctx, s)
-			if err != nil {
-				return fmt.Errorf("creating case %q: %w", s.Name, err)
-			}
-			created = append(created, *ec)
-		}
-
-		if isJSON() {
-			return printJSON(created)
-		}
-		for _, c := range created {
-			fmt.Printf("Created: %s (%s)\n", c.Name, c.ID)
-		}
-		return nil
-	},
-}
-
 var evalRunsCmd = &cobra.Command{
 	Use:   "runs",
-	Short: "Manage eval runs",
+	Short: "Inspect eval runs",
 }
 
 var evalRunsListCmd = &cobra.Command{
@@ -367,20 +143,209 @@ var evalRunsGetCmd = &cobra.Command{
 	},
 }
 
-func init() {
-	evalsCreateCmd.Flags().StringVar(&evalCreateName, "name", "", "Case name (required)")
-	evalsCreateCmd.Flags().StringVar(&evalCreateDesc, "description", "", "Case description")
-	evalsCreateCmd.Flags().StringVar(&evalCreateSet, "set", "", "Eval set name")
-	evalsCreateCmd.Flags().StringVar(&evalCreatePrompt, "prompt", "", "Test prompt (required)")
-	evalsCreateCmd.Flags().StringVar(&evalCreateCriteria, "criteria", "", "Eval criteria (required)")
-	evalsCreateCmd.Flags().StringVar(&evalCreateSystem, "system", "", "System prompt")
-	evalsCreateCmd.Flags().Int32Var(&evalCreateThreshold, "threshold", 0, "Pass threshold (1-10)")
-	evalsCreateCmd.MarkFlagRequired("name")
-	evalsCreateCmd.MarkFlagRequired("prompt")
-	evalsCreateCmd.MarkFlagRequired("criteria")
+// --- tavora evals run <agent> ---
 
-	evalsRunCmd.Flags().StringVar(&evalRunSet, "set", "", "Filter by eval set name")
-	evalsRunCmd.Flags().StringVar(&evalRunJudge, "judge", "", "Judge model override")
+var (
+	evalRunWait    bool
+	evalRunGate    bool
+	evalRunTimeout time.Duration
+)
+
+var evalsRunCmd = &cobra.Command{
+	Use:   "run <agent>",
+	Short: "Trigger an eval run against the agent's pinned suite (live persona)",
+	Long: `Trigger an eval run against the agent's pinned suite, using the
+deployed (live) persona. By default fires the run and exits; use
+--wait to block until completion and --gate to also exit non-zero
+when any case fails (suitable as the last step of a CI eval job).
+
+The agent argument accepts either the code-first local id (e.g.
+"support" from tavora/agents/support/agent.jsonc) or the server UUID.
+
+Examples:
+  tavora evals run support
+  tavora evals run support --wait
+  tavora evals run support --gate --timeout 10m`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		agentID, err := resolveAgentID(ctx, args[0])
+		if err != nil {
+			return err
+		}
+
+		res, err := client.RunAgentEval(ctx, agentID)
+		if err != nil {
+			return err
+		}
+		wait := evalRunWait || evalRunGate
+
+		if !wait {
+			if isJSON() {
+				return printJSON(res)
+			}
+			fmt.Printf("Eval run started: %s\n", res.Run.ID)
+			fmt.Printf("  Status: %s\n", res.Run.Status)
+			fmt.Printf("  Cases:  %d\n", res.Run.TotalCases)
+			fmt.Println()
+			fmt.Println("Re-run with --wait or --gate to block until completion.")
+			return nil
+		}
+
+		fmt.Fprintf(os.Stderr, "Eval run %s started, waiting for completion", res.Run.ID)
+		detail, err := pollEvalRun(ctx, res.Run.ID, evalRunTimeout)
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return err
+		}
+
+		if isJSON() {
+			if err := printJSON(detail); err != nil {
+				return err
+			}
+		} else {
+			printEvalResults(detail)
+		}
+
+		if evalRunGate && detail.Run.Failed > 0 {
+			return fmt.Errorf("eval gate failed: %d/%d cases did not pass", detail.Run.Failed, detail.Run.TotalCases)
+		}
+		return nil
+	},
+}
+
+// --- tavora evals latest <agent> ---
+
+var evalsLatestCmd = &cobra.Command{
+	Use:   "latest <agent>",
+	Short: "Show the most recent eval run for an agent + per-case results",
+	Long: `Pulls the most recent eval run for the agent's pinned suite and
+prints the same per-case table that 'tavora evals runs get' produces.
+Convenience for the common 'did the last run pass?' question.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		agentID, err := resolveAgentID(ctx, args[0])
+		if err != nil {
+			return err
+		}
+
+		runs, err := client.ListAgentEvalRuns(ctx, agentID, 1)
+		if err != nil {
+			return err
+		}
+		if len(runs) == 0 {
+			fmt.Println("No eval runs yet. Trigger one with `tavora evals run <agent>`.")
+			return nil
+		}
+
+		detail, err := client.GetEvalRun(ctx, runs[0].ID)
+		if err != nil {
+			return err
+		}
+		if isJSON() {
+			return printJSON(detail)
+		}
+		printEvalResults(detail)
+		return nil
+	},
+}
+
+// pollEvalRun blocks until the run reaches a terminal state or the
+// timeout fires. Prints a dot per poll to stderr so CI logs show
+// progress without being noisy.
+func pollEvalRun(ctx context.Context, runID string, timeout time.Duration) (*tavora.EvalRunDetail, error) {
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		detail, err := client.GetEvalRun(ctx, runID)
+		if err != nil {
+			return nil, fmt.Errorf("polling eval run: %w", err)
+		}
+		switch detail.Run.Status {
+		case "passed", "failed", "completed":
+			// Terminal "done" states the runner emits today. Anything
+			// else (pending / running) keeps polling.
+			return detail, nil
+		case "error":
+			return detail, fmt.Errorf("eval run errored (server-side failure, distinct from a failed case — inspect the run detail)")
+		}
+		fmt.Fprint(os.Stderr, ".")
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("timed out after %s waiting for eval run to complete", timeout)
+		case <-ticker.C:
+		}
+	}
+}
+
+// printEvalResults renders the per-case table + summary. Matches the
+// shape the retired examples/eval-ci binary printed so CI users
+// porting from it get a familiar log format.
+func printEvalResults(detail *tavora.EvalRunDetail) {
+	fmt.Fprintf(os.Stderr, "\nRun: %s | Status: %s\n\n", detail.Run.ID, detail.Run.Status)
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "CASE\tSCORE\tPASS\tDURATION")
+	fmt.Fprintln(w, "----\t-----\t----\t--------")
+	for _, r := range detail.Results {
+		pass := "FAIL"
+		if r.Pass {
+			pass = "PASS"
+		}
+		fmt.Fprintf(w, "%s\t%d/10\t%s\t%dms\n", r.CaseName, r.Score, pass, r.DurationMs)
+	}
+	_ = w.Flush()
+
+	fmt.Fprintf(os.Stderr, "\nPassed: %d/%d | Average Score: %.1f/10\n",
+		detail.Run.Passed, detail.Run.TotalCases, detail.Run.AverageScore)
+}
+
+// resolveAgentID maps a CLI argument (local id like "support" OR a
+// server UUID OR an agent display name) to the server-side agent
+// UUID that `RunAgentEval` expects. Calls ListAgentConfigs once and
+// then defers to pickAgent for the in-memory match.
+func resolveAgentID(ctx context.Context, arg string) (string, error) {
+	configs, err := client.ListAgentConfigs(ctx)
+	if err != nil {
+		return "", fmt.Errorf("list agents: %w", err)
+	}
+	return pickAgent(arg, configs)
+}
+
+// pickAgent is the pure resolver — separated from resolveAgentID so
+// the matching policy can be unit-tested without a fake transport.
+// Resolution order: agent.id (exact UUID match) → code_first_local_id
+// (the agent.jsonc `id`) → display name (case-sensitive). The order
+// matters: a literal UUID always wins so a user who pasted an id
+// never ambiguously matches a same-named local agent.
+func pickAgent(arg string, configs []tavora.AgentConfig) (string, error) {
+	for _, c := range configs {
+		if c.ID == arg {
+			return c.ID, nil
+		}
+	}
+	for _, c := range configs {
+		if c.CodeFirstLocalID != nil && *c.CodeFirstLocalID == arg {
+			return c.ID, nil
+		}
+	}
+	for _, c := range configs {
+		if c.Name == arg {
+			return c.ID, nil
+		}
+	}
+	return "", fmt.Errorf("no agent matches %q (tried agent.id, code_first_local_id, name)", arg)
+}
+
+func init() {
 	evalsRunCmd.Flags().BoolVar(&evalRunWait, "wait", false, "Poll until the run completes; print a results table")
 	evalsRunCmd.Flags().BoolVar(&evalRunGate, "gate", false, "Implies --wait; exit non-zero if any case fails (for CI)")
 	evalsRunCmd.Flags().DurationVar(&evalRunTimeout, "timeout", 5*time.Minute, "Max wait for completion (only with --wait or --gate)")
@@ -389,9 +354,7 @@ func init() {
 	evalRunsCmd.AddCommand(evalRunsGetCmd)
 
 	evalsCmd.AddCommand(evalsListCmd)
-	evalsCmd.AddCommand(evalsCreateCmd)
-	evalsCmd.AddCommand(evalsDeleteCmd)
 	evalsCmd.AddCommand(evalsRunCmd)
-	evalsCmd.AddCommand(evalsSeedCmd)
+	evalsCmd.AddCommand(evalsLatestCmd)
 	evalsCmd.AddCommand(evalRunsCmd)
 }
