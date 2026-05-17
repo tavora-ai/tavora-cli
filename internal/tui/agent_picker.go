@@ -133,7 +133,7 @@ func resolveAgent(ctx context.Context, client *tavora.Client, flag string) (*tav
 
 func ensureActiveVersion(a *tavora.AgentConfig) (*tavora.AgentConfig, error) {
 	if a.ActiveVersionID == nil || *a.ActiveVersionID == "" {
-		return nil, fmt.Errorf("agent %q (%s) has no active version — create one with `tavora agent-versions create %s` or via the admin UI", a.Name, a.ID, a.ID)
+		return nil, fmt.Errorf("agent %q (%s) has no active version — publish one with `tavora deploy` from the agent's tavora/ folder, or use the Publish button in the platform UI", a.Name, a.ID)
 	}
 	return a, nil
 }
