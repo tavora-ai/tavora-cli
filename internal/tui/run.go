@@ -152,41 +152,81 @@ func printResumeHint(session *tavora.AgentSession) {
 	fmt.Fprintf(os.Stderr, "resume:  tavora tui --session %s\n", session.ID)
 }
 
-// acquireConfigForFolder resolves credentials. Order, in folder mode:
-//   - --reset-config → setup TUI
-//   - ~/.tavora.yaml (the CLI's config; tavora login wrote this)
-//   - TAVORA_URL + TAVORA_API_KEY env
-//   - TUI's own config file (legacy)
+// acquireConfigForFolder resolves credentials. Order (same as the
+// `tavora` CLI's flag > env > ~/.tavora.yaml > default chain, minus
+// the flag layer which the TUI doesn't take):
+//
+//   - --reset-config              → setup TUI
+//   - TAVORA_URL + TAVORA_API_KEY  → env wins outright when both set
+//   - either env var + a file      → env overrides per-field, file fills the rest
+//   - ~/.tavora.yaml (folder mode) → CLI's config (written by tavora login)
+//   - TUI's own config (legacy)
 //   - setup TUI
 //
-// Outside folder mode the CLI config step is skipped, preserving the
-// pre-folder behavior where the TUI managed its own credentials.
+// Env vars are checked first so a one-off `TAVORA_API_KEY=… tavora tui`
+// invocation overrides the stored file, matching the CLI's behavior and
+// the universal "env beats config" convention. Pre-folder behavior is
+// preserved: outside folder mode, ~/.tavora.yaml is skipped entirely.
 func acquireConfigForFolder(forceSetup bool, folder *folderContext) (*Config, *tavora.Project, error) {
 	if !forceSetup {
-		// CLI config first — when folder mode is on, the user has
-		// almost certainly logged in via `tavora login`. Re-asking
-		// for a key would be confusing.
+		// Env first. If both vars are set we go straight to validate;
+		// if only one is, we'll merge it onto whichever file-based
+		// config we find below.
+		envURL := strings.TrimSpace(os.Getenv("TAVORA_URL"))
+		envKey := strings.TrimSpace(os.Getenv("TAVORA_API_KEY"))
+		if envURL != "" && envKey != "" {
+			cfg := &Config{URL: envURL, APIKey: envKey}
+			if ws, err := validate(cfg); err == nil {
+				slog.Info("connected via env credentials", "project", ws.Name)
+				return cfg, ws, nil
+			} else {
+				slog.Warn("env credentials rejected; falling back", "err", err)
+			}
+		}
+
+		// Per-field merge helper: take the file's value and override
+		// with env when set. So `TAVORA_API_KEY=... tavora tui` with
+		// URL in ~/.tavora.yaml still picks the env key, and
+		// vice-versa.
+		merge := func(file *Config) *Config {
+			out := *file
+			if envURL != "" {
+				out.URL = envURL
+			}
+			if envKey != "" {
+				out.APIKey = envKey
+			}
+			return &out
+		}
+
+		// ~/.tavora.yaml — only consulted in folder mode (the user
+		// has run `tavora login` for the CLI; reuse the same key).
 		if folder != nil {
 			if cli := loadCLIConfig(); cli != nil {
-				if ws, err := validate(cli); err == nil {
-					slog.Info("connected via ~/.tavora.yaml", "project", ws.Name)
-					return cli, ws, nil
+				cfg := merge(cli)
+				if ws, err := validate(cfg); err == nil {
+					if envURL != "" || envKey != "" {
+						slog.Info("connected via ~/.tavora.yaml + env override", "project", ws.Name)
+					} else {
+						slog.Info("connected via ~/.tavora.yaml", "project", ws.Name)
+					}
+					return cfg, ws, nil
 				} else {
-					slog.Warn("CLI credentials rejected; falling back", "err", err)
+					slog.Warn("~/.tavora.yaml credentials rejected; falling back", "err", err)
 				}
 			}
 		}
-		if env := EnvConfig(); env != nil {
-			if ws, err := validate(env); err == nil {
-				slog.Info("connected via env credentials", "project", ws.Name)
-				return env, ws, nil
-			} else {
-				slog.Warn("env credentials rejected; falling back to setup", "err", err)
-			}
-		}
-		if cfg, err := LoadConfig(); err == nil {
+
+		// TUI's own stored config (the file written by the setup TUI
+		// on first run; legacy path).
+		if stored, err := LoadConfig(); err == nil {
+			cfg := merge(stored)
 			if ws, err := validate(cfg); err == nil {
-				slog.Info("connected via stored credentials", "project", ws.Name)
+				if envURL != "" || envKey != "" {
+					slog.Info("connected via stored config + env override", "project", ws.Name)
+				} else {
+					slog.Info("connected via stored credentials", "project", ws.Name)
+				}
 				return cfg, ws, nil
 			} else {
 				slog.Warn("stored credentials rejected; rerunning setup", "err", err)
