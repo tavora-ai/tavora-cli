@@ -77,8 +77,14 @@ tasks:
 
   release:dry:
     desc: Dry-run against the current tag (real version, no upload) — artifacts in ./dist
+    # Inject the gh CLI's token so the github-mode changelog can call
+    # the compare API locally. Honours an explicit GITHUB_TOKEN if the
+    # caller already exported one; falls back to `gh auth token` when
+    # they haven't. Without either, goreleaser still runs but the
+    # changelog step 401s — install gh, run `gh auth login`, or skip
+    # changelog with `--skip=changelog`.
     cmds:
-      - goreleaser release --skip=announce,publish,validate --clean
+      - GITHUB_TOKEN="${GITHUB_TOKEN:-$(gh auth token 2>/dev/null)}" goreleaser release --skip=announce,publish,validate --clean
 
   # ---------- run from source ----------
 
