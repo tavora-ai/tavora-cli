@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
-	"github.com/tavora-ai/tavora-tools/internal/codefirst/runs"
+	"github.com/tavora-ai/tavora-cli/internal/codefirst/runs"
 )
 
 // `tavora session` reads session logs out of `tavora/.runs/`. The

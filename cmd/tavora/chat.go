@@ -279,12 +279,12 @@ var chatInteractiveCmd = &cobra.Command{
 func init() {
 	chatCompleteCmd.Flags().StringVar(&chatModel, "model", "", "AI model (default: gemini-2.5-flash)")
 	chatCompleteCmd.Flags().StringVar(&chatSystem, "system", "", "System prompt")
-	chatCompleteCmd.Flags().BoolVar(&chatUseRAG, "rag", false, "Enable RAG from app documents")
+	chatCompleteCmd.Flags().BoolVar(&chatUseRAG, "rag", false, "Enable RAG from project documents")
 	chatCompleteCmd.Flags().StringVar(&chatIndexID, "store", "", "Limit RAG to store ID")
 
 	chatInteractiveCmd.Flags().StringVar(&interactiveSystem, "system", "", "System prompt")
 	chatInteractiveCmd.Flags().StringVar(&interactiveModel, "model", "", "AI model")
-	chatInteractiveCmd.Flags().BoolVar(&interactiveUseRAG, "rag", false, "Enable RAG from app documents")
+	chatInteractiveCmd.Flags().BoolVar(&interactiveUseRAG, "rag", false, "Enable RAG from project documents")
 	chatInteractiveCmd.Flags().StringVar(&interactiveIndexID, "store", "", "Limit RAG to store ID")
 
 	conversationsListCmd.Flags().IntVar(&convListLimit, "limit", 20, "Max conversations to return")

@@ -55,11 +55,11 @@ func Plan(opt Options) []File {
 `, opt.ProjectName, apiLine)
 
 	agent := `{
-  // The "support" starter agent. Edit me — or copy this folder and
-  // start a second agent next to it.
+  // The starter agent. Edit this folder, or copy it to create a
+  // second agent alongside ("agents/<id>/agent.jsonc").
   "$schema": "https://docs.tavora.ai/schemas/agent.schema.json",
-  "id": "support",
-  "name": "Support",
+  "id": "starter",
+  "name": "Starter",
   "model": {
     "provider": "gemini",
     "name": "gemini-2.5-flash"
@@ -67,12 +67,12 @@ func Plan(opt Options) []File {
   "persona": "./persona.md",
   "capabilities": ["search", "fetch", "ai"],
 
-  // Skills are files; file extension picks the kind.
-  //   .js = module skill (require()'d by the JS thinking-core)
-  //   .md = prompt skill (concatenated into the system prompt)
+  // Skills are folders. Each folder needs a skill.md (the
+  // LLM-facing prompt) and may include a main.js (require()'d
+  // by the JS thinking-core when present).
   "skills": [
-    "./skills/order-status.js",
-    "./skills/refund-policy.md"
+    "./skills/now/",
+    "./skills/style/"
   ],
 
   // Indexes are referenced by name; ingestion lives in the UI/CLI.
@@ -93,54 +93,59 @@ func Plan(opt Options) []File {
 }
 `
 
-	persona := `You are a helpful customer support agent for Acme Inc.
+	persona := `You are a helpful assistant.
 
-Be concise, friendly, and accurate. When you don't know something,
-say so and offer to escalate. Prefer the order-status skill to
-verify any order-specific claims.
+Be concise, accurate, and direct. When you don't know something, say
+so plainly rather than guessing. Prefer short, well-structured
+answers over long ones.
 
-Reply in plain text unless the user asks for a list.
+Replace this file with your actual persona — it's the system prompt
+your agent runs with.
 `
 
-	orderSkill := `// order-status — look up an order by ID.
+	nowSkillMD := "# now — current ISO timestamp\n\n" +
+		"Returns the current time in ISO 8601 format. Use whenever the\n" +
+		"agent needs a timestamp (logs, \"as of …\" phrasing, freshness\n" +
+		"checks).\n\n" +
+		"Call from a think script with `require('now').iso()`.\n"
+
+	nowSkillJS := `// now — return the current ISO timestamp.
 //
 // Module skills are CommonJS-style. The thinking-core require()'s
-// this file and the LLM calls the exported function from inside its
-// JS reasoning snippet.
+// this file from inside the JS reasoning snippet the LLM emits, then
+// calls the exported function. Replace this stub with whatever
+// domain logic you need (fetch your API, query a database, etc.).
 
 module.exports = {
   /**
-   * @param {string} orderID
-   * @returns {Promise<{id: string, daysOld: number, status: string}>}
+   * @returns {string} current time in ISO 8601 format
    */
-  async lookup(orderID) {
-    // TODO: replace with a real fetch() to your order system.
-    return {
-      id: orderID,
-      daysOld: 7,
-      status: 'shipped',
-    };
+  iso() {
+    return new Date().toISOString();
   },
 };
 `
 
-	refundSkill := `# Refund Policy
+	styleSkillMD := `# Style
 
-Acme refunds any order returned within **30 days** of delivery.
-After 30 days, offer store credit at the manager's discretion.
+Write in plain language. Avoid jargon unless the user used it first.
+One idea per paragraph; prefer concrete examples over abstractions.
 
-When a customer asks for a refund:
+Format guidance:
 
-1. Confirm the order ID and use ` + "`require('./skills/order-status').lookup(id)`" + ` to verify.
-2. If ` + "`daysOld < 30`" + `, approve the refund.
-3. Otherwise, explain the policy and offer store credit.
+- Use bullet lists when enumerating three or more things.
+- Use code blocks for code, commands, and file paths.
+- Skip preambles like "Sure!" or "Great question!".
+
+Edit this file to encode whatever writing conventions your agent
+should follow — it gets concatenated into the system prompt.
 `
 
-	happyEval := `{
+	basicEval := `{
   "$schema": "https://docs.tavora.ai/schemas/evalcase.schema.json",
-  "name": "refund-happy-path",
-  "input": "Can I refund order #12345?",
-  "criteria": "Response mentions the 30-day refund window and explains the policy clearly.",
+  "name": "responds-to-greeting",
+  "input": "Hello — can you help me?",
+  "criteria": "Response is a brief, polite acknowledgment that offers to help. Does not include preambles like 'Sure!' or 'Great question!'.",
   "pass_threshold": 7
 }
 `
@@ -149,6 +154,11 @@ When a customer asks for a refund:
 # Studio keeps the full server-side history; the local copy is just
 # for AI coding tools that read from disk.
 .runs/
+
+# Per-developer deployment binding (TAVORA_DEPLOYMENT). Each
+# developer's clone gets their own; sharing this file would point
+# two devs at the same dev draft and cause sync collisions.
+.env.local
 
 # Editor swap files
 *.swp
@@ -178,8 +188,9 @@ tavora/
       agent.jsonc                       # model, capabilities, skill + index + eval bindings
       persona.md                        # system prompt
       skills/
-        <name>.js                       # module skill — require()'d from the JS thinking-core
-        <name>.md                       # prompt skill — concatenated into the system prompt
+        <name>/                         # one folder per skill
+          skill.md                      # required — LLM-facing prompt + how to use
+          main.js                       # optional — require()'d from the JS thinking-core
       evals/
         <case>.json                     # eval cases ({name?, input, criteria, pass_threshold?})
   .runs/                                # auto-generated session logs (gitignored)
@@ -218,11 +229,14 @@ draft.
   %[1]stavora mcp%[1]s / %[1]stavora schedules%[1]s.
 - **persona.md** — the system prompt. Plain markdown; the runtime
   passes it verbatim to the model.
-- **skills/*.js** — module skill. CommonJS-shaped: %[1]smodule.exports
-  = { fn(...) { ... } }%[1]s. The LLM emits JS in its %[1]sthink%[1]s loop and
-  %[1]srequire()%[1]s's these modules to compose tasks.
-- **skills/*.md** — prompt skill. Concatenated into the system
-  prompt at session start. Good for policies and reference text.
+- **skills/<name>/skill.md** — required for every skill. The
+  LLM-facing prompt explaining what the skill does and when to use
+  it. For a prompt-only skill this is the whole skill; for a module
+  skill, this is how the LLM learns about %[1]srequire('<name>')%[1]s.
+- **skills/<name>/main.js** — optional. Module entry point,
+  CommonJS-shaped: %[1]smodule.exports = { fn(...) { ... } }%[1]s. The LLM
+  emits JS in its %[1]sthink%[1]s loop and %[1]srequire('<name>')%[1]s's this
+  module to compose tasks. Folder name = require() id.
 - **evals/*.json** — eval cases. One per file with %[1]s{name?, input,
   criteria, pass_threshold?}%[1]s. Source-sync upserts them under the
   agent's suite (%[1]s__cf__/<agent-id>%[1]s namespace); the resulting
@@ -233,7 +247,7 @@ draft.
 
 The AI verification loop is a closed loop on disk:
 
-1. Edit a file (persona.md, skills/*.js, agent.jsonc, …).
+1. Edit a file (persona.md, skills/<name>/skill.md or main.js, agent.jsonc, …).
 2. %[1]stavora config show <agent>%[1]s — the cheap "did my change
    parse, and did the binding land?" check.
 3. %[1]stavora run <agent> "<input>"%[1]s — invoke the just-synced draft.
@@ -272,11 +286,12 @@ published versions share %[1]sagent_versions%[1]s with a %[1]skind%[1]s column).
 	return []File{
 		{"tavora.jsonc", manifest},
 		{"AGENTS.md", agentsMD},
-		{"agents/support/agent.jsonc", agent},
-		{"agents/support/persona.md", persona},
-		{"agents/support/skills/order-status.js", orderSkill},
-		{"agents/support/skills/refund-policy.md", refundSkill},
-		{"agents/support/evals/happy-path.json", happyEval},
+		{"agents/starter/agent.jsonc", agent},
+		{"agents/starter/persona.md", persona},
+		{"agents/starter/skills/now/skill.md", nowSkillMD},
+		{"agents/starter/skills/now/main.js", nowSkillJS},
+		{"agents/starter/skills/style/skill.md", styleSkillMD},
+		{"agents/starter/evals/basic.json", basicEval},
 		{".gitignore", gitignore},
 	}
 }

@@ -1,18 +1,20 @@
-package main
+package tui
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/muesli/reflow/wordwrap"
 	tavora "github.com/tavora-ai/tavora-sdk-go"
 )
@@ -30,10 +32,11 @@ import (
 // stays responsive while the agent is reasoning.
 type mainModel struct {
 	client  *tavora.Client
-	ws      *tavora.App
+	ws      *tavora.Project
 	agent   *tavora.AgentConfig // nil when resuming a session by ID
 	session *tavora.AgentSession
 	logPath string
+	folder  *folderContext // nil when not running in folder mode
 
 	viewport viewport.Model
 	input    textinput.Model
@@ -71,7 +74,7 @@ type sessionStartedMsg struct {
 	err     error
 }
 
-func newMainModel(client *tavora.Client, ws *tavora.App, logPath string, resume *tavora.AgentSession, agent *tavora.AgentConfig) mainModel {
+func newMainModel(client *tavora.Client, ws *tavora.Project, logPath string, resume *tavora.AgentSession, agent *tavora.AgentConfig, folder *folderContext) mainModel {
 	in := textinput.New()
 	in.Placeholder = "Ask anything. /help for commands."
 	in.Prompt = "› "
@@ -88,6 +91,7 @@ func newMainModel(client *tavora.Client, ws *tavora.App, logPath string, resume 
 		agent:      agent,
 		logPath:    logPath,
 		session:    resume,
+		folder:     folder,
 		input:      in,
 		spin:       sp,
 		historyIdx: -1,
@@ -158,10 +162,10 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m.submit()
 		case "pgup":
-			m.viewport.HalfViewUp()
+			m.viewport.HalfPageUp()
 			return m, nil
 		case "pgdown":
-			m.viewport.HalfViewDown()
+			m.viewport.HalfPageDown()
 			return m, nil
 		case "up":
 			if m.ready && !m.running {
@@ -233,14 +237,14 @@ func (m mainModel) handleResize(msg tea.WindowSizeMsg) mainModel {
 	if vpH < 3 {
 		vpH = 3
 	}
-	if !m.ready || m.viewport.Width == 0 {
-		m.viewport = viewport.New(msg.Width, vpH)
+	if !m.ready || m.viewport.Width() == 0 {
+		m.viewport = viewport.New(viewport.WithWidth(msg.Width), viewport.WithHeight(vpH))
 		m.viewport.SetContent(m.output)
 	} else {
-		m.viewport.Width = msg.Width
-		m.viewport.Height = vpH
+		m.viewport.SetWidth(msg.Width)
+		m.viewport.SetHeight(vpH)
 	}
-	m.input.Width = msg.Width - lipgloss.Width(m.input.Prompt) - 2
+	m.input.SetWidth(msg.Width - lipgloss.Width(m.input.Prompt) - 2)
 	return m
 }
 
@@ -347,6 +351,8 @@ func (m *mainModel) renderEvent(e tavora.AgentEvent) {
 			kind = "sandbox"
 		}
 		m.appendDim(fmt.Sprintf("  • %s: %s", kind, truncate(summary, 100)))
+	case "asset_created":
+		m.handleAssetEvent(e)
 	case "response":
 		m.appendAgent(e.Content)
 	case "error":
@@ -356,6 +362,56 @@ func (m *mainModel) renderEvent(e tavora.AgentEvent) {
 			m.appendDim(fmt.Sprintf("  [%d steps · %d prompt + %d completion tokens]",
 				e.Summary.Steps, e.Summary.Tokens.Prompt, e.Summary.Tokens.Completion))
 		}
+	}
+}
+
+// handleAssetEvent surfaces the asset to the chat scroll and, when
+// running in folder mode, downloads the bytes into the project's
+// .assets/ tree so the user can open the file in their editor right
+// next to the chat. Errors degrade gracefully — a missing download
+// just prints a warning, the chat keeps going.
+func (m *mainModel) handleAssetEvent(e tavora.AgentEvent) {
+	meta := e.AsAsset()
+	if meta == nil || meta.ID == "" {
+		m.appendDim("  📎 asset (metadata missing)")
+		return
+	}
+	// Headline line — always shown, regardless of folder mode.
+	m.appendDim(fmt.Sprintf("  📎 %s · %s · %s", meta.Name, meta.Mime, humanSize(meta.Size)))
+
+	if m.folder == nil || m.session == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	bytes, _, err := m.client.GetAgentAsset(ctx, meta.ID)
+	if err != nil {
+		m.appendDim(fmt.Sprintf("    (download failed: %v)", err))
+		return
+	}
+	dir := m.folder.AssetDir(m.session.ID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		m.appendDim(fmt.Sprintf("    (mkdir failed: %v)", err))
+		return
+	}
+	dest := filepath.Join(dir, meta.Name)
+	if err := os.WriteFile(dest, bytes, 0o644); err != nil {
+		m.appendDim(fmt.Sprintf("    (write failed: %v)", err))
+		return
+	}
+	// Use a path the user can paste into `code <path>` / `open <path>`
+	// directly. The folder root is absolute, so the join below is too.
+	m.appendDim(fmt.Sprintf("    → %s", dest))
+}
+
+func humanSize(bytes int64) string {
+	switch {
+	case bytes < 1024:
+		return fmt.Sprintf("%d B", bytes)
+	case bytes < 1024*1024:
+		return fmt.Sprintf("%.1f KB", float64(bytes)/1024)
+	default:
+		return fmt.Sprintf("%.1f MB", float64(bytes)/1024/1024)
 	}
 }
 
@@ -461,26 +517,76 @@ func (m *mainModel) wrap(s string) string {
 }
 
 func (m *mainModel) scrollToBottom() {
-	if m.viewport.Height == 0 {
+	if m.viewport.Height() == 0 {
 		return
 	}
 	m.viewport.SetContent(m.output)
 	m.viewport.GotoBottom()
 }
 
-func (m mainModel) View() string {
+func (m mainModel) View() tea.View {
+	var content string
 	if m.width == 0 {
-		return "loading..."
+		content = "loading..."
+	} else {
+		content = strings.Join([]string{
+			m.headerView(),
+			m.viewport.View(),
+			m.footerView(),
+		}, "\n")
 	}
-	return strings.Join([]string{
-		m.headerView(),
-		m.viewport.View(),
-		m.footerView(),
-	}, "\n")
+	v := tea.NewView(content)
+	v.AltScreen = true
+	// Mouse wheel scrolls the trace viewport. AllMotion (vs.
+	// CellMotion) lets us receive scroll-while-not-clicking, which
+	// is what users expect when reading a long agent trace.
+	v.MouseMode = tea.MouseModeAllMotion
+	// Per-session terminal tab title. The agent name is most useful
+	// for picking the right tab when several TUI sessions are open
+	// side-by-side; falls back to the session id prefix when the
+	// session was resumed by --session and we never bound a local
+	// AgentConfig.
+	v.WindowTitle = m.windowTitle()
+	return v
+}
+
+// windowTitle composes the per-tab title shown by terminals that
+// support OSC 2 (most do, including iTerm2, Kitty, Alacritty,
+// GNOME Terminal). Order of preference:
+//
+//	agent.Name + project          when bound to a code-first agent
+//	"session " + short(id)        when resuming by --session
+//	"Tavora · " + project         while the session is still booting
+//
+// Project is folder.Manifest.Project when folder mode is on, else
+// the server-side project name from the API key.
+func (m mainModel) windowTitle() string {
+	proj := ""
+	if m.folder != nil {
+		proj = m.folder.Manifest.Project
+	} else if m.ws != nil {
+		proj = m.ws.Name
+	}
+	switch {
+	case m.agent != nil && proj != "":
+		return fmt.Sprintf("%s · %s · Tavora", m.agent.Name, proj)
+	case m.agent != nil:
+		return m.agent.Name + " · Tavora"
+	case m.session != nil:
+		id := m.session.ID
+		if len(id) > 8 {
+			id = id[:8]
+		}
+		return "session " + id + " · Tavora"
+	case proj != "":
+		return "Tavora · " + proj
+	default:
+		return "Tavora"
+	}
 }
 
 func (m mainModel) headerView() string {
-	left := fmt.Sprintf("app: %s", m.ws.Name)
+	left := fmt.Sprintf("project: %s", m.ws.Name)
 	right := "agent-tui"
 	if m.session != nil {
 		right = "session: " + m.session.ID[:min(8, len(m.session.ID))]

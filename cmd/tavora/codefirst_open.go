@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/tavora-ai/tavora-tools/internal/codefirst/source"
+	"github.com/tavora-ai/tavora-cli/internal/codefirst/source"
 )
 
 // tavora open <ref> — resolves a server-side resource name to a

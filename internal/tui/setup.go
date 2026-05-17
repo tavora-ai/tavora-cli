@@ -1,4 +1,4 @@
-package main
+package tui
 
 import (
 	"context"
@@ -7,16 +7,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	tavora "github.com/tavora-ai/tavora-sdk-go"
 )
 
 // setupModel runs a small two-field form (URL, API key) and validates
-// the credentials by calling GetApp before persisting them. It
-// reports the resulting Config + App back to the caller via
+// the credentials by calling GetProject before persisting them. It
+// reports the resulting Config + Project back to the caller via
 // program-level messages so main.go can hand off into mainModel.
 
 type setupStep int
@@ -35,7 +35,7 @@ type setupModel struct {
 	spin    spinner.Model
 	err     error
 	cfg     *Config
-	ws      *tavora.App
+	ws      *tavora.Project
 	width   int
 	height  int
 	exiting bool
@@ -43,7 +43,7 @@ type setupModel struct {
 
 type setupValidatedMsg struct {
 	cfg *Config
-	ws  *tavora.App
+	ws  *tavora.Project
 }
 
 type setupErrorMsg struct{ err error }
@@ -51,7 +51,7 @@ type setupErrorMsg struct{ err error }
 // SetupResult is what main.go receives once the setup TUI quits.
 type SetupResult struct {
 	Cfg *Config
-	WS  *tavora.App
+	WS  *tavora.Project
 }
 
 func newSetupModel(seed *Config) setupModel {
@@ -59,7 +59,7 @@ func newSetupModel(seed *Config) setupModel {
 	url.Placeholder = "https://api.tavora.ai"
 	url.Prompt = "  URL  › "
 	url.CharLimit = 256
-	url.Width = 60
+	url.SetWidth(60)
 	url.Focus()
 	if seed != nil && seed.URL != "" {
 		url.SetValue(seed.URL)
@@ -69,7 +69,7 @@ func newSetupModel(seed *Config) setupModel {
 	key.Placeholder = "tvr_..."
 	key.Prompt = "  Key  › "
 	key.CharLimit = 256
-	key.Width = 60
+	key.SetWidth(60)
 	key.EchoMode = textinput.EchoPassword
 	key.EchoCharacter = '•'
 	if seed != nil && seed.APIKey != "" {
@@ -185,12 +185,12 @@ func validateCmd(cfg *Config) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		client := tavora.NewClient(cfg.URL, cfg.APIKey)
-		ws, err := client.GetApp(ctx)
+		ws, err := client.GetProject(ctx)
 		if err != nil {
 			slog.Warn("setup validation failed", "url", cfg.URL, "err", err)
 			return setupErrorMsg{err: err}
 		}
-		slog.Info("setup validated", "url", cfg.URL, "app", ws.Name)
+		slog.Info("setup validated", "url", cfg.URL, "project", ws.Name)
 		return setupValidatedMsg{cfg: cfg, ws: ws}
 	}
 }
@@ -207,11 +207,11 @@ var (
 			Padding(1, 2)
 )
 
-func (m setupModel) View() string {
+func (m setupModel) View() tea.View {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Tavora — Agent TUI"))
 	b.WriteString("\n")
-	b.WriteString(subtleStyle.Render("Connect to an app. The API key scopes everything you do."))
+	b.WriteString(subtleStyle.Render("Connect to a project. The API key scopes everything you do."))
 	b.WriteString("\n\n")
 
 	switch m.step {
@@ -227,7 +227,7 @@ func (m setupModel) View() string {
 		b.WriteString(m.spin.View())
 		b.WriteString(" validating credentials...")
 	case stepDone:
-		b.WriteString(fmt.Sprintf("Connected to app: %s", m.ws.Name))
+		b.WriteString(fmt.Sprintf("Connected to project: %s", m.ws.Name))
 	}
 
 	if m.err != nil {
@@ -237,5 +237,7 @@ func (m setupModel) View() string {
 
 	b.WriteString("\n\n")
 	b.WriteString(subtleStyle.Render("enter to continue · tab to switch field · esc/ctrl+c to quit"))
-	return boxStyle.Render(b.String())
+	v := tea.NewView(boxStyle.Render(b.String()))
+	v.AltScreen = true
+	return v
 }

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/tavora-ai/tavora-tools/internal/codefirst/source"
-	"github.com/tavora-ai/tavora-tools/internal/codefirst/validate"
+	"github.com/tavora-ai/tavora-cli/internal/codefirst/source"
+	"github.com/tavora-ai/tavora-cli/internal/codefirst/validate"
 )
 
 // watchAndSync is the long-running loop behind `tavora dev`. It

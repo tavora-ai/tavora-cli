@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,9 +16,9 @@ import (
 
 	"github.com/spf13/cobra"
 	tavora "github.com/tavora-ai/tavora-sdk-go"
-	"github.com/tavora-ai/tavora-tools/internal/codefirst/scaffold"
-	"github.com/tavora-ai/tavora-tools/internal/codefirst/source"
-	"github.com/tavora-ai/tavora-tools/internal/codefirst/validate"
+	"github.com/tavora-ai/tavora-cli/internal/codefirst/scaffold"
+	"github.com/tavora-ai/tavora-cli/internal/codefirst/source"
+	"github.com/tavora-ai/tavora-cli/internal/codefirst/validate"
 )
 
 // Code-first verbs. The implementation notes in
@@ -25,7 +28,7 @@ import (
 // --- tavora init ---
 
 var (
-	initProjectName string
+	initProjectSlug string // --project — matches the cloud-side Project slug
 	initAPIURL      string
 	initForce       bool
 	initDir         string
@@ -49,43 +52,12 @@ Existing files are preserved unless --force is set.`,
   tavora init --project acme-support
   tavora init --dir ./vendor/tavora --force`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		root := initDir
-		if root == "" {
-			cwd, err := os.Getwd()
-			if err != nil {
-				return err
-			}
-			root = filepath.Join(cwd, "tavora")
-		}
-		project := initProjectName
-		if project == "" {
-			project = filepath.Base(filepath.Dir(root))
-			if project == "." || project == "/" || project == "" {
-				project = "tavora-project"
-			}
-		}
-		opt := scaffold.Options{
-			Root:        root,
-			ProjectName: project,
-			APIURL:      initAPIURL,
-			Force:       initForce,
-		}
-		if initDryRun {
-			for _, f := range scaffold.Plan(opt) {
-				status("would write %s", filepath.Join(root, f.RelPath))
-			}
-			return nil
-		}
-		written, err := scaffold.Write(opt)
+		root, err := runInitFlow(initDir, initProjectSlug, initForce, initDryRun)
 		if err != nil {
 			return err
 		}
-		if len(written) == 0 {
-			status("no files written (already present — pass --force to overwrite)")
+		if initDryRun || root == "" {
 			return nil
-		}
-		for _, p := range written {
-			status("wrote %s", p)
 		}
 		fmt.Println()
 		fmt.Println("Next steps:")
@@ -96,6 +68,72 @@ Existing files are preserved unless --force is set.`,
 	},
 }
 
+// runInitFlow is the shared scaffold+bind path for both `tavora init`
+// and `tavora dev`'s offer-to-init fallback. Returns the absolute
+// root of the scaffolded folder, or "" when --dry-run printed the
+// plan and didn't write anything. Caller decides whether to print
+// the "Next steps:" footer.
+func runInitFlow(rootHint, appSlug string, force, dryRun bool) (string, error) {
+	root := rootHint
+	if root == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		root = filepath.Join(cwd, "tavora")
+	}
+	project := appSlug
+	if project == "" {
+		// If the user is already logged in (api key configured), the
+		// truthful default is the slug of the project that key is bound
+		// to — that's where source-sync will actually route. Falling
+		// back to the directory name was a pre-deployments choice
+		// and confuses users who init inside `<repo>/backend-go/`.
+		project = tryGetProjectSlug()
+	}
+	if project == "" {
+		project = filepath.Base(filepath.Dir(root))
+		if project == "." || project == "/" || project == "" {
+			project = "tavora-project"
+		}
+	}
+	opt := scaffold.Options{
+		Root:        root,
+		ProjectName: project,
+		APIURL:      initAPIURL,
+		Force:       force,
+	}
+	if dryRun {
+		for _, f := range scaffold.Plan(opt) {
+			status("would write %s", filepath.Join(root, f.RelPath))
+		}
+		return "", nil
+	}
+	written, err := scaffold.Write(opt)
+	if err != nil {
+		return "", err
+	}
+	if len(written) == 0 {
+		status("no files written (already present — pass --force to overwrite)")
+		return root, nil
+	}
+	for _, p := range written {
+		status("wrote %s", p)
+	}
+
+	// Best-effort cloud bind: mint (or reuse) the user's dev
+	// deployment and write its slug to <root>/.env.local. Failures
+	// aren't fatal — `tavora dev` will fall back to the server's
+	// resolver auto-create on first sync.
+	if err := bindCloudDeployment(root); err != nil {
+		status("cloud bind skipped: %v", err)
+		status("run `tavora login` then `tavora dev` to bind on first sync.")
+	} else {
+		status("wrote %s", filepath.Join(root, ".env.local"))
+	}
+	return root, nil
+}
+
 // --- tavora dev ---
 
 var (
@@ -103,6 +141,7 @@ var (
 	devOnce    bool
 	devNoSync  bool
 	devVerbose bool
+	devNoInit  bool
 )
 
 var codefirstDevCmd = &cobra.Command{
@@ -118,20 +157,58 @@ Pass --once to do a single validate + sync (useful for CI). Pass
 	RunE: func(cmd *cobra.Command, args []string) error {
 		p, err := loadProjectOrFail(devDir)
 		if err != nil {
-			return err
+			// If the failure is "no tavora.jsonc found anywhere", offer
+			// to scaffold one in-process so the user doesn't have to
+			// quit, run init, and re-run dev. Skipped in CI / non-TTY /
+			// when --no-init is set, so scripts get the clean failure.
+			if !isMissingTavoraFolderErr(err) || devNoInit || !isInteractive() {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "No tavora/ folder found at or above this directory.\n")
+			if !promptYesNo("Scaffold one here with `tavora init`?") {
+				return fmt.Errorf("aborted; run `tavora init` first (or pass --no-init to skip this prompt)")
+			}
+			root, initErr := runInitFlow("", "", false, false)
+			if initErr != nil {
+				return initErr
+			}
+			if devDir == "" {
+				devDir = root
+			}
+			fmt.Println()
+			p, err = loadProjectOrFail(devDir)
+			if err != nil {
+				return err
+			}
 		}
+		// Stamp the project root as the sync source for this
+		// process. The transport reads CurrentSyncSource on every
+		// outgoing request and sets X-Tavora-Source, letting the
+		// server detect "two tavora/ folders authoring the same
+		// agent" and warn back.
+		CurrentSyncSource = p.Root
+
+		// Warn loudly when the user invoked `tavora dev` (no --no-sync)
+		// but no API key is configured — otherwise the "sync skipped"
+		// status looks identical to --no-sync and they wonder why the
+		// server never sees their agents.
+		if !devNoSync && client == nil {
+			status("warning: no API key configured — running in local-only mode (run `tavora login` or set TAVORA_API_KEY to enable sync)")
+		}
+		effectiveNoSync := devNoSync || client == nil
+
 		// In watch mode we deliberately swallow the validate error
 		// from the first pass so the user can keep editing toward
 		// green. --once exits with a non-zero code so CI / scripts
 		// still see the failure.
-		firstErr := runValidateAndSync(p, devNoSync || client == nil, devVerbose)
+		firstErr := runValidateAndSync(p, effectiveNoSync, devVerbose)
 		if devOnce {
 			return firstErr
 		}
 		if firstErr != nil {
 			status("%v — keep editing; the watcher will retry on every save", firstErr)
 		}
-		return watchAndSync(p, devNoSync || client == nil, devVerbose)
+		return watchAndSync(p, effectiveNoSync, devVerbose)
 	},
 }
 
@@ -169,6 +246,10 @@ the whole project deploys; pass --agent <id> to deploy just one.
 		if client == nil {
 			return fmt.Errorf("no API key configured — run 'tavora login' first or use --dry-run")
 		}
+
+		// See dev RunE for the rationale; deploy pre-syncs then
+		// promotes, so it also wants source-flip detection.
+		CurrentSyncSource = p.Root
 
 		sdkManifest := toSDKManifest(manifest, p)
 		if _, err := client.SourceSync(globalCtx(), sdkManifest); err != nil {
@@ -246,6 +327,44 @@ func loadProjectOrFail(dir string) (*source.Project, error) {
 	return p, nil
 }
 
+// isMissingTavoraFolderErr reports whether the error from source.Load
+// is the "walked up to / and never found tavora.jsonc" case — the
+// only error worth offering to scaffold around in dev. String-matched
+// today because source.Load returns plain fmt.Errorf strings; if the
+// source package ever surfaces typed errors, swap in errors.Is.
+func isMissingTavoraFolderErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "no tavora.jsonc found")
+}
+
+// isInteractive reports whether the CLI can prompt the user. False
+// when stdin isn't a TTY (piped input, CI runners) or when CI=true
+// is set explicitly so scripts get clean failures instead of hanging
+// on a read.
+func isInteractive() bool {
+	if os.Getenv("CI") != "" {
+		return false
+	}
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
+// promptYesNo asks a Y/n question on stdin/stderr and returns true
+// for empty input, "y", or "yes" (case-insensitive). Default is Y;
+// the prompt prints "[Y/n]" so the user can confirm with Enter.
+func promptYesNo(question string) bool {
+	fmt.Fprintf(os.Stderr, "%s [Y/n]: ", question)
+	reader := bufio.NewReader(os.Stdin)
+	line, _ := reader.ReadString('\n')
+	line = strings.TrimSpace(strings.ToLower(line))
+	return line == "" || line == "y" || line == "yes"
+}
+
 func runValidateAndSync(p *source.Project, noSync bool, verbose bool) error {
 	issues := validate.Project(p)
 	printIssues(p, issues)
@@ -261,9 +380,19 @@ func runValidateAndSync(p *source.Project, noSync bool, verbose bool) error {
 	sdkManifest := toSDKManifest(manifest, p)
 	result, err := client.SourceSync(globalCtx(), sdkManifest)
 	if err != nil {
-		// Synthesize a clear hint when the backend hasn't shipped
-		// the source-sync handler yet — the most likely cause for
-		// a 404 in v0 of this rollout.
+		// 422 carries the server's validation issues in the response
+		// body; surface them inline so the user sees what to fix.
+		// Other errors get the legacy "endpoint may not exist yet"
+		// hint — useful when running against an older server.
+		if issues, ok := extractServerIssues(err); ok {
+			for _, i := range issues {
+				fmt.Fprintf(os.Stderr, "[%s] %s\n  %s\n", padSeverity(i.Severity), serverIssueLocation(i), i.Message)
+				if i.Hint != "" {
+					fmt.Fprintf(os.Stderr, "  hint: %s\n", i.Hint)
+				}
+			}
+			return fmt.Errorf("source-sync rejected: %d server validation issue(s)", len(issues))
+		}
 		return fmt.Errorf("source-sync failed: %w\n  hint: backend may not yet expose /api/sdk/source-sync — use --no-sync to validate locally", err)
 	}
 	for _, i := range result.ServerIssues {
@@ -285,6 +414,33 @@ func short(hash string) string {
 		return hash
 	}
 	return hash[7:19]
+}
+
+// extractServerIssues pulls the server's `issues` array out of a 422
+// response. The SDK exposes the raw body fields via APIError.Details;
+// SourceSyncHandler returns {"issues": [...]} on validation failure
+// with shape {file,line,column,severity,code,message,hint}. We
+// JSON-roundtrip the Details["issues"] value into the SDK's typed
+// SourceValidationIssue so the caller can format it the same way as
+// successful-sync issues.
+func extractServerIssues(err error) ([]tavora.SourceValidationIssue, bool) {
+	var apiErr *tavora.APIError
+	if !errors.As(err, &apiErr) {
+		return nil, false
+	}
+	raw, ok := apiErr.Details["issues"]
+	if !ok {
+		return nil, false
+	}
+	buf, mErr := json.Marshal(raw)
+	if mErr != nil {
+		return nil, false
+	}
+	var issues []tavora.SourceValidationIssue
+	if uErr := json.Unmarshal(buf, &issues); uErr != nil {
+		return nil, false
+	}
+	return issues, len(issues) > 0
 }
 
 func padSeverity(s string) string {
@@ -495,7 +651,7 @@ func buildManifest(p *source.Project) SyncManifest {
 }
 
 func init() {
-	codefirstInitCmd.Flags().StringVar(&initProjectName, "project", "", "Project name written into tavora.jsonc")
+	codefirstInitCmd.Flags().StringVar(&initProjectSlug, "project", "", "Cloud Project slug to bind this folder to (written into tavora.jsonc as the project field)")
 	codefirstInitCmd.Flags().StringVar(&initAPIURL, "api-url", "", "API URL written into tavora.jsonc (default: omit; CLI uses ~/.tavora.yaml)")
 	codefirstInitCmd.Flags().BoolVar(&initForce, "force", false, "Overwrite existing files")
 	codefirstInitCmd.Flags().StringVar(&initDir, "dir", "", "Directory to scaffold (default: ./tavora)")
@@ -505,6 +661,7 @@ func init() {
 	codefirstDevCmd.Flags().BoolVar(&devOnce, "once", false, "Validate + sync a single time and exit")
 	codefirstDevCmd.Flags().BoolVar(&devNoSync, "no-sync", false, "Validate locally only — do not contact the server")
 	codefirstDevCmd.Flags().BoolVarP(&devVerbose, "verbose", "v", false, "Print extra detail on every cycle")
+	codefirstDevCmd.Flags().BoolVar(&devNoInit, "no-init", false, "Don't offer to run tavora init when no tavora/ folder is found (default: prompt interactively)")
 
 	codefirstDeployCmd.Flags().StringVar(&deployDir, "dir", "", "Project directory containing tavora.jsonc")
 	codefirstDeployCmd.Flags().StringVar(&deployAgent, "agent", "", "Deploy a single agent by id (default: all agents)")

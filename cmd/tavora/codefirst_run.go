@@ -2,14 +2,15 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 	tavora "github.com/tavora-ai/tavora-sdk-go"
-	"github.com/tavora-ai/tavora-tools/internal/codefirst/runs"
-	"github.com/tavora-ai/tavora-tools/internal/codefirst/source"
-	"github.com/tavora-ai/tavora-tools/internal/codefirst/validate"
+	"github.com/tavora-ai/tavora-cli/internal/codefirst/runs"
+	"github.com/tavora-ai/tavora-cli/internal/codefirst/source"
+	"github.com/tavora-ai/tavora-cli/internal/codefirst/validate"
 )
 
 // `tavora run <agent> "<input>" --draft` is the AI verification
@@ -28,9 +29,10 @@ import (
 // natural next step now that drafts run.
 
 var (
-	runDraftDir   string
-	runDraftLive  bool
-	runDraftTitle string
+	runDraftDir       string
+	runDraftLive      bool
+	runDraftTitle     string
+	runDraftAssetsDir string
 )
 
 var codefirstRunCmd = &cobra.Command{
@@ -120,15 +122,48 @@ deployed version instead.`,
 		status("session %s — agent %s, target %s", session.ID, localID, target)
 
 		recorder := runs.New()
+
+		// Resolve the assets-dir: explicit flag wins, otherwise default
+		// to <project>/.assets/<session-id>/ so each run keeps its
+		// output isolated and the AI coding loop can grep across runs.
+		assetsDir := runDraftAssetsDir
+		if assetsDir == "" {
+			assetsDir = filepath.Join(p.Root, ".assets", session.ID)
+		}
+
+		downloadAsset := func(evt tavora.AgentEvent) {
+			meta := evt.AsAsset()
+			if meta == nil || meta.ID == "" {
+				return
+			}
+			if err := os.MkdirAll(assetsDir, 0o755); err != nil {
+				status("asset %s: mkdir failed: %v", meta.Name, err)
+				return
+			}
+			bytes, _, err := client.GetAgentAsset(cmd.Context(), meta.ID)
+			if err != nil {
+				status("asset %s: download failed: %v", meta.Name, err)
+				return
+			}
+			dest := filepath.Join(assetsDir, meta.Name)
+			if err := os.WriteFile(dest, bytes, 0o644); err != nil {
+				status("asset %s: write failed: %v", meta.Name, err)
+				return
+			}
+			status("asset → %s (%d bytes, %s)", dest, meta.Size, meta.Mime)
+		}
+
 		var handler func(evt tavora.AgentEvent)
 		if isJSON() {
 			handler = func(evt tavora.AgentEvent) {
 				recorder.Handle(evt)
+				downloadAsset(evt)
 				printJSON(evt) //nolint:errcheck
 			}
 		} else {
 			handler = func(evt tavora.AgentEvent) {
 				recorder.Handle(evt)
+				downloadAsset(evt)
 				printAgentEvent(evt)
 			}
 		}
@@ -166,6 +201,7 @@ func init() {
 	codefirstRunCmd.Flags().StringVar(&runDraftDir, "dir", "", "Project directory containing tavora.jsonc")
 	codefirstRunCmd.Flags().BoolVar(&runDraftLive, "live", false, "Run against the deployed version instead of the dev draft")
 	codefirstRunCmd.Flags().StringVar(&runDraftTitle, "title", "", "Session title (default: \"tavora run <agent> (<target>)\")")
+	codefirstRunCmd.Flags().StringVar(&runDraftAssetsDir, "assets-dir", "", "Where to write agent-generated assets (default: <project>/.assets/<session-id>/)")
 
 	rootCmd.AddCommand(codefirstRunCmd)
 }

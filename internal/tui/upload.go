@@ -1,4 +1,4 @@
-package main
+package tui
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	tavora "github.com/tavora-ai/tavora-sdk-go"
 )
 
@@ -24,7 +24,7 @@ type uploadResultMsg struct {
 //
 // Resolution order:
 //   1. If the user typed `/upload <path> <store>`, look it up by ID
-//      first, then by name (case-insensitive) within the app's
+//      first, then by name (case-insensitive) within the project's
 //      stores list.
 //   2. Otherwise, fetch the active version once and cache its
 //      stores_json. If exactly one store is bound, use it. If zero or

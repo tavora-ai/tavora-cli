@@ -1,4 +1,4 @@
-package main
+package tui
 
 import (
 	"encoding/json"
@@ -9,7 +9,7 @@ import (
 )
 
 // Config holds the persisted credentials the TUI needs to connect to a
-// Tavora app. The API key is app-scoped — there is nothing
+// Tavora project. The API key is project-scoped — there is nothing
 // else to "select" once it is supplied.
 type Config struct {
 	URL    string `json:"url"`

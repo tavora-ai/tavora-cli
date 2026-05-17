@@ -14,7 +14,7 @@ import (
 // surface; the skills table now has one writer (source-sync).
 var skillsCmd = &cobra.Command{
 	Use:   "skills",
-	Short: "Inspect skills deployed to the current app",
+	Short: "Inspect skills deployed to the current project",
 }
 
 var skillsListCmd = &cobra.Command{

@@ -1,0 +1,158 @@
+version: '3'
+
+# tavora-cli — Taskfile for the `tavora` CLI.
+#
+# The TUI is now `tavora tui` (a subcommand of the main binary); the
+# previous standalone `tavora-tui` binary was retired 2026-05-17 when
+# the same code moved to internal/tui/.
+#
+# Common workflows:
+#   task install              # build & install the tavora binary to $GOBIN
+#   task tui                  # run the agent TUI from source
+#   task cli -- agents list   # passthrough any tavora subcommand
+#
+# Requires:
+#   - Go 1.25+
+#   - Optional: TAVORA_URL and TAVORA_API_KEY in your shell (or `~/.tavora.yaml` written by `tavora login`).
+
+vars:
+  CLI_PKG: ./cmd/tavora
+  SDK_MOD: github.com/tavora-ai/tavora-sdk-go
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  # ---------- install / build ----------
+
+  install:
+    desc: go install the tavora binary into $GOBIN
+    cmds:
+      - go install {{.CLI_PKG}}
+
+  build:
+    desc: go build the tavora binary (./tavora in cwd)
+    cmds:
+      - go build -o tavora {{.CLI_PKG}}
+
+  test:
+    desc: Run all tests
+    cmds:
+      - go test ./...
+
+  tidy:
+    desc: go mod tidy
+    cmds:
+      - go mod tidy
+
+  fmt:
+    desc: gofmt -w .
+    cmds:
+      - gofmt -w .
+
+  vet:
+    desc: go vet ./...
+    cmds:
+      - go vet ./...
+
+  clean:
+    desc: Remove locally built binaries
+    cmds:
+      - rm -f tavora
+
+  # ---------- run from source ----------
+
+  cli:
+    desc: 'Run the CLI from source. Pass args after `--`. Example: task cli -- agents list'
+    cmds:
+      - go run {{.CLI_PKG}} {{.CLI_ARGS}}
+
+  tui:
+    desc: Run the agent TUI from source (`tavora tui`)
+    cmds:
+      - go run {{.CLI_PKG}} tui
+
+  version:
+    desc: Print CLI version (from source)
+    cmds:
+      - go run {{.CLI_PKG}} version
+
+  # ---------- common CLI shortcuts ----------
+
+  app:show:
+    desc: tavora app show
+    cmds:
+      - go run {{.CLI_PKG}} app show
+
+  agents:list:
+    desc: tavora agents list
+    cmds:
+      - go run {{.CLI_PKG}} agents list
+
+  skills:list:
+    desc: tavora skills list
+    cmds:
+      - go run {{.CLI_PKG}} skills list
+
+  schedules:list:
+    desc: tavora schedules list
+    cmds:
+      - go run {{.CLI_PKG}} schedules list
+
+  evals:list:
+    desc: tavora evals list
+    cmds:
+      - go run {{.CLI_PKG}} evals list
+
+  documents:list:
+    desc: tavora documents list
+    cmds:
+      - go run {{.CLI_PKG}} documents list
+
+  # ---------- code-first workflow ----------
+
+  cf:init:
+    desc: tavora init — scaffold ./tavora/
+    cmds:
+      - go run {{.CLI_PKG}} init {{.CLI_ARGS}}
+
+  cf:dev:
+    desc: tavora dev — watch + validate + sync the local tavora/ folder
+    cmds:
+      - go run {{.CLI_PKG}} dev {{.CLI_ARGS}}
+
+  cf:deploy:
+    desc: tavora deploy — cut an immutable published version
+    cmds:
+      - go run {{.CLI_PKG}} deploy {{.CLI_ARGS}}
+
+  cf:config:
+    desc: tavora config show <agent> — print resolved agent config
+    cmds:
+      - go run {{.CLI_PKG}} config {{.CLI_ARGS}}
+
+  cf:session:
+    desc: tavora session — list / inspect dev-draft run logs
+    cmds:
+      - go run {{.CLI_PKG}} session {{.CLI_ARGS}}
+
+  cf:run:
+    desc: tavora run <agent> "<input>" — invoke an agent (add --draft for dev-draft)
+    cmds:
+      - go run {{.CLI_PKG}} run {{.CLI_ARGS}}
+
+  # ---------- SDK iteration (local checkout) ----------
+
+  sdk:link:
+    desc: Point go.mod at ../tavora-sdk-go (local replace, for iterating against unreleased SDK)
+    cmds:
+      - go mod edit -replace {{.SDK_MOD}}=../tavora-sdk-go
+      - go mod tidy
+
+  sdk:unlink:
+    desc: Drop the local SDK replace directive
+    cmds:
+      - go mod edit -dropreplace {{.SDK_MOD}}
+      - go mod tidy

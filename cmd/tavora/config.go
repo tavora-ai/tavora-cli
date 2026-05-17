@@ -52,6 +52,15 @@ func loadConfigFile() *configFile {
 	return &cfg
 }
 
+// maskKey returns a short prefix-only preview of an API key for
+// display in prompts and the post-save confirmation.
+func maskKey(k string) string {
+	if len(k) > 8 {
+		return k[:8] + "..."
+	}
+	return k
+}
+
 // loginCmd was previously bound to `tavora init`; renamed when the
 // code-first verbs took over `init` for project scaffolding. The
 // behavior — interactively write ~/.tavora.yaml with API key + URL —
@@ -70,32 +79,54 @@ var loginCmd = &cobra.Command{
 		// Load existing config for defaults
 		existing := loadConfigFile()
 
+		// Env vars take precedence over the existing config file when
+		// pre-filling defaults — if the user has TAVORA_API_KEY /
+		// TAVORA_URL exported, they almost certainly want `tavora
+		// login` to capture those into the config, not override them
+		// with a stale ~/.tavora.yaml.
+		envURL := strings.TrimSpace(os.Getenv("TAVORA_URL"))
+		envKey := strings.TrimSpace(os.Getenv("TAVORA_API_KEY"))
+
 		// Prompt for URL
 		defaultURL := "http://localhost:8080"
+		urlSource := ""
 		if existing != nil && existing.URL != "" {
 			defaultURL = existing.URL
 		}
-		fmt.Printf("Server URL [%s]: ", defaultURL)
+		if envURL != "" {
+			defaultURL = envURL
+			urlSource = " (from $TAVORA_URL)"
+		}
+		fmt.Printf("Server URL [%s]%s: ", defaultURL, urlSource)
 		urlInput, _ := reader.ReadString('\n')
 		urlInput = strings.TrimSpace(urlInput)
 		if urlInput == "" {
 			urlInput = defaultURL
 		}
 
-		// Prompt for API key
+		// Prompt for API key. Print a deep link so the user can
+		// jump directly to the api-keys page in the dashboard
+		// without manual navigation — Convex-style `convex login`
+		// uses a full browser-OAuth dance; this is the cheap
+		// halfway-house version that at least skips the "where do I
+		// find this?" hop.
 		defaultKey := ""
 		hint := ""
+		keySource := ""
 		if existing != nil && existing.APIKey != "" {
-			// Show masked version of existing key
 			defaultKey = existing.APIKey
-			if len(defaultKey) > 8 {
-				hint = defaultKey[:8] + "..."
-			} else {
-				hint = defaultKey
-			}
+			hint = maskKey(defaultKey)
+		}
+		if envKey != "" {
+			defaultKey = envKey
+			hint = maskKey(defaultKey)
+			keySource = " (from $TAVORA_API_KEY)"
+		}
+		if defaultKey == "" {
+			fmt.Printf("\nNeed a key? Open %s/settings/api-keys and create one.\n\n", strings.TrimRight(urlInput, "/"))
 		}
 		if hint != "" {
-			fmt.Printf("API Key [%s]: ", hint)
+			fmt.Printf("API Key [%s]%s: ", hint, keySource)
 		} else {
 			fmt.Print("API Key: ")
 		}
@@ -125,7 +156,7 @@ var loginCmd = &cobra.Command{
 
 		fmt.Printf("\nConfig saved to %s\n", path)
 		fmt.Printf("  URL:     %s\n", cfg.URL)
-		fmt.Printf("  API Key: %s...\n", cfg.APIKey[:min(8, len(cfg.APIKey))])
+		fmt.Printf("  API Key: %s\n", maskKey(cfg.APIKey))
 		return nil
 	},
 }

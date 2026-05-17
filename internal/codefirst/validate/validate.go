@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tavora-ai/tavora-tools/internal/codefirst/source"
+	"github.com/tavora-ai/tavora-cli/internal/codefirst/source"
 )
 
 // Known capability names. Server-side authoritative; this list is a
@@ -108,11 +108,13 @@ func checkAgent(p *source.Project, a *source.Agent) []Issue {
 		}
 	}
 
-	// Skill-side checks beyond what the loader already records.
+	// Skill-side checks beyond what the loader already records. The
+	// loader resolves each skill to a folder; module skills carry a
+	// non-empty ModulePath pointing at main.js.
 	for _, s := range a.Skills {
-		if s.Kind == source.SkillModule {
-			if err := smokeCheckJS(s.Path); err != nil {
-				out = append(out, fatal(s.RelPath, "skill-js-parse",
+		if s.Kind == source.SkillModule && s.ModulePath != "" {
+			if err := smokeCheckJS(s.ModulePath); err != nil {
+				out = append(out, fatal(s.RelPath+"/main.js", "skill-js-parse",
 					fmt.Sprintf("skill JS does not parse: %s", err),
 					"the dev runtime treats this as a syntax error before any LLM sees it"))
 			}

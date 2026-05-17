@@ -20,7 +20,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tavora-ai/tavora-tools/internal/codefirst/jsonc"
+	"github.com/tavora-ai/tavora-cli/internal/codefirst/jsonc"
 )
 
 // Project is the in-memory shape of a tavora.jsonc file plus all
@@ -106,13 +106,22 @@ type Eval struct {
 	RelPath string
 }
 
-// Skill is a resolved skill file — either a .js module skill or a
-// .md prompt skill.
+// Skill is a resolved skill folder. Every skill has a required
+// skill.md (the LLM-facing prompt) and an optional main.js (the
+// require()-able sandbox module). Folder name = skill name.
+//
+// SkillKind is derived from whether main.js exists:
+//
+//	skill.md only          → Kind == SkillPrompt
+//	skill.md + main.js     → Kind == SkillModule (skill.md still ships as the prompt)
 type Skill struct {
 	Kind       SkillKind
-	BindingRaw string // the path as written in agent.jsonc
-	Path       string // absolute resolved path
-	RelPath    string // path relative to project root
+	BindingRaw string // the path as written in agent.jsonc (the folder)
+	Name       string // folder basename, e.g. "style"
+	Path       string // absolute resolved folder path
+	RelPath    string // folder path relative to project root
+	PromptPath string // absolute path to skill.md
+	ModulePath string // absolute path to main.js, "" when none
 }
 
 type SkillKind string
@@ -318,9 +327,16 @@ func loadAgent(root, agentConfigPath string) (*Agent, []Issue) {
 		}
 	}
 
-	// Skills (globs allowed; each binding may match multiple files)
+	// Skills are folders, not files. Binding can be:
+	//   "./skills/style"         — exact folder
+	//   "./skills/style/"        — trailing slash, same thing
+	//   "./skills/*"             — glob over direct subfolders
+	// A folder is a valid skill iff it contains skill.md. main.js is
+	// optional (its presence flips Kind to SkillModule); any other
+	// files in the folder are surfaced as warnings so the user knows
+	// they're not bundled.
 	for _, binding := range cfg.Skills {
-		matches, err := resolveGlob(dir, binding)
+		folders, err := resolveSkillBinding(dir, binding)
 		if err != nil {
 			issues = append(issues, Issue{
 				File:    relTo(root, agentConfigPath),
@@ -329,41 +345,31 @@ func loadAgent(root, agentConfigPath string) (*Agent, []Issue) {
 			})
 			continue
 		}
-		if len(matches) == 0 {
+		if len(folders) == 0 {
 			issues = append(issues, Issue{
 				File:    relTo(root, agentConfigPath),
-				Code:    "missing-skill-file",
-				Message: fmt.Sprintf("skill binding %q matches no files", binding),
-				Hint:    `expected one of "./skills/<name>.js" (module) or "./skills/<name>.md" (prompt)`,
+				Code:    "missing-skill-folder",
+				Message: fmt.Sprintf("skill binding %q matches no folders", binding),
+				Hint:    `expected "./skills/<name>/" containing a skill.md (required) and optional main.js`,
 			})
 			continue
 		}
-		for _, m := range matches {
-			kind, ok := skillKindFor(m)
-			if !ok {
-				issues = append(issues, Issue{
-					File:    relTo(root, agentConfigPath),
-					Code:    "bad-skill-extension",
-					Message: fmt.Sprintf("skill file %q has unsupported extension (only .js and .md)", relTo(root, m)),
-				})
+		for _, folder := range folders {
+			skill, fIssues := loadSkillFolder(root, agentConfigPath, binding, folder)
+			issues = append(issues, fIssues...)
+			if skill == nil {
 				continue
 			}
-			b, err := os.ReadFile(m)
-			if err != nil {
-				issues = append(issues, Issue{
-					File:    relTo(root, agentConfigPath),
-					Code:    "read-skill-file",
-					Message: err.Error(),
-				})
-				continue
+			a.Skills = append(a.Skills, *skill)
+			// Record both files in SourceBytes so the manifest carries them.
+			if b, err := os.ReadFile(skill.PromptPath); err == nil {
+				a.SourceBytes[relTo(root, skill.PromptPath)] = b
 			}
-			a.Skills = append(a.Skills, Skill{
-				Kind:       kind,
-				BindingRaw: binding,
-				Path:       m,
-				RelPath:    relTo(root, m),
-			})
-			a.SourceBytes[relTo(root, m)] = b
+			if skill.ModulePath != "" {
+				if b, err := os.ReadFile(skill.ModulePath); err == nil {
+					a.SourceBytes[relTo(root, skill.ModulePath)] = b
+				}
+			}
 		}
 	}
 
@@ -415,15 +421,107 @@ func loadAgent(root, agentConfigPath string) (*Agent, []Issue) {
 	return a, issues
 }
 
-func skillKindFor(path string) (SkillKind, bool) {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".js":
-		return SkillModule, true
-	case ".md":
-		return SkillPrompt, true
-	default:
-		return "", false
+// resolveSkillBinding returns the set of skill folders a binding
+// resolves to. Trailing slashes are tolerated. Plain paths resolve
+// to a single folder; glob patterns ("./skills/*") expand to every
+// matching direct child. Non-folder matches are skipped silently —
+// callers re-issue a "missing-skill-folder" diagnostic if the result
+// is empty.
+func resolveSkillBinding(base, binding string) ([]string, error) {
+	trimmed := strings.TrimRight(binding, "/")
+	if strings.ContainsAny(trimmed, "*?[") {
+		matches, err := resolveGlob(base, trimmed)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]string, 0, len(matches))
+		for _, m := range matches {
+			info, err := os.Stat(m)
+			if err == nil && info.IsDir() {
+				out = append(out, m)
+			}
+		}
+		return out, nil
 	}
+	full := resolveRelative(base, trimmed)
+	info, err := os.Stat(full)
+	if err != nil {
+		return nil, nil
+	}
+	if !info.IsDir() {
+		return nil, nil
+	}
+	return []string{full}, nil
+}
+
+// loadSkillFolder inspects a single skill folder and resolves it
+// into a Skill. Required: skill.md. Optional: main.js. Other files
+// produce a warning but don't fail the load.
+func loadSkillFolder(root, agentConfigPath, binding, folder string) (*Skill, []Issue) {
+	var issues []Issue
+	name := filepath.Base(folder)
+	promptPath := filepath.Join(folder, "skill.md")
+	modulePath := filepath.Join(folder, "main.js")
+
+	if _, err := os.Stat(promptPath); err != nil {
+		issues = append(issues, Issue{
+			File:    relTo(root, agentConfigPath),
+			Code:    "missing-skill-md",
+			Message: fmt.Sprintf("skill folder %q has no skill.md", relTo(root, folder)),
+			Hint:    "every skill folder needs a skill.md (the LLM-facing prompt). Add it or remove the binding.",
+		})
+		return nil, issues
+	}
+	kind := SkillPrompt
+	hasModule := false
+	if _, err := os.Stat(modulePath); err == nil {
+		kind = SkillModule
+		hasModule = true
+	}
+
+	// Warn on any unexpected files so the user knows they're not
+	// bundled into the skill. .ts source maps and editor cruft
+	// (.DS_Store, .swp) are silently ignored.
+	entries, _ := os.ReadDir(folder)
+	for _, e := range entries {
+		if e.IsDir() {
+			issues = append(issues, Issue{
+				File:    relTo(root, agentConfigPath),
+				Code:    "extra-skill-entry",
+				Message: fmt.Sprintf("nested folder %q inside skill %q is ignored", e.Name(), name),
+				Hint:    "skills are flat folders — move nested content out or flatten it.",
+			})
+			continue
+		}
+		switch e.Name() {
+		case "skill.md", "main.js":
+			continue
+		case ".DS_Store":
+			continue
+		}
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		issues = append(issues, Issue{
+			File:    relTo(root, agentConfigPath),
+			Code:    "extra-skill-file",
+			Message: fmt.Sprintf("file %q inside skill %q is not bundled", e.Name(), name),
+			Hint:    "only skill.md and main.js are recognized. Rename to main.js (entry module), or remove.",
+		})
+	}
+
+	skill := &Skill{
+		Kind:       kind,
+		BindingRaw: binding,
+		Name:       name,
+		Path:       folder,
+		RelPath:    relTo(root, folder),
+		PromptPath: promptPath,
+	}
+	if hasModule {
+		skill.ModulePath = modulePath
+	}
+	return skill, issues
 }
 
 // resolveRelative resolves a path relative to the agent's folder.

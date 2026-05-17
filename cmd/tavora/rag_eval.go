@@ -50,7 +50,7 @@ Two modes today:
 Both default to the tavora-testdata corpus, expected as a sibling clone:
 
     dev/tavora-ai/
-    ├── tavora-tools/      # this binary's source
+    ├── tavora-cli/      # this binary's source
     └── tavora-testdata/   # corpus + ground truth
 
 Override with --testdata <path>.`,

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 	tavora "github.com/tavora-ai/tavora-sdk-go"
@@ -18,7 +20,7 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "tavora",
 	Short: "Tavora CLI — developer client for the Tavora API",
-	Long: `Tavora CLI lets you interact with your Tavora app from the terminal.
+	Long: `Tavora CLI lets you interact with your Tavora project from the terminal.
 
 Two workflows live here:
 
@@ -29,7 +31,7 @@ Two workflows live here:
     tavora config show <agent>   print resolved config
 
   API client — manage stores, documents, sessions, evals against
-  your hosted Tavora app via X-API-Key auth.
+  your hosted Tavora project via X-API-Key auth.
 
 Configuration precedence (highest to lowest):
   1. Command-line flags (--api-key, --url)
@@ -40,14 +42,16 @@ Run 'tavora login' to write credentials to the config file.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Skip client init for commands that don't need it. The
-		// code-first verbs (init, dev with --no-sync, deploy with
-		// --dry-run, config show) can run against the local
-		// filesystem alone.
+		// Skip client init for commands that can't talk to the server
+		// at all (no API in scope, or local-only verbs).
 		switch cmd.Name() {
 		case "help", "completion", "version":
 			return nil
-		case "init", "login", "show", "dev", "deploy":
+		case "init", "login", "show", "tui":
+			// "tui" manages its own credentials (via internal/tui's
+			// folder→~/.tavora.yaml→env→setup chain), so it
+			// shouldn't fail here just because no API key was on the
+			// flags. Same reasoning as "login".
 			return nil
 		case "session", "latest":
 			// `tavora session …` reads from local disk only — no
@@ -61,34 +65,27 @@ Run 'tavora login' to write credentials to the config file.`,
 			return nil
 		}
 
-		// Load config file as baseline
-		cfg := loadConfigFile()
-
-		// Resolve URL: flag > env > config > default
-		url := flagURL
-		if url == "" {
-			url = os.Getenv("TAVORA_URL")
-		}
-		if url == "" && cfg != nil {
-			url = cfg.URL
-		}
-		if url == "" {
-			url = "http://localhost:8080"
-		}
-
-		// Resolve API key: flag > env > config
-		key := flagAPIKey
+		url, key := resolveAPIConfig()
 		if key == "" {
-			key = os.Getenv("TAVORA_API_KEY")
-		}
-		if key == "" && cfg != nil {
-			key = cfg.APIKey
-		}
-		if key == "" {
-			return fmt.Errorf("no API key configured — set TAVORA_API_KEY, use --api-key, or run 'tavora init'")
+			// The code-first verbs `dev` and `deploy` can still do
+			// useful local work (validate, --no-sync, --dry-run) when
+			// no API key is configured. Leave client = nil and let
+			// the verb decide whether that's fatal — `deploy` errors
+			// out, `dev` prints a "sync skipped" status and keeps
+			// watching files.
+			if cmd.Name() == "dev" || cmd.Name() == "deploy" {
+				return nil
+			}
+			return fmt.Errorf("no API key configured — set TAVORA_API_KEY, use --api-key, or run 'tavora login'")
 		}
 
-		client = tavora.NewClient(url, key)
+		// httpClientForDeployment wires the X-Tavora-Deployment header
+		// through resty via SDK's WithHTTPClient option. The header is
+		// the Convex-shape binding from tavora/.env.local — empty if
+		// the user hasn't run `tavora init` yet, in which case the
+		// server's deployment-resolver middleware falls back to the
+		// project's prod deployment.
+		client = tavora.NewClient(url, key, tavora.WithHTTPClient(httpClientForDeployment()))
 		return nil
 	},
 }
@@ -110,7 +107,7 @@ func init() {
 	rootCmd.AddCommand(agentsCmd)
 	rootCmd.AddCommand(skillsCmd)
 	rootCmd.AddCommand(templatesCmd)
-	rootCmd.AddCommand(schedulesCmd)
+	rootCmd.AddCommand(scheduleCmd)
 	rootCmd.AddCommand(evalsCmd)
 	rootCmd.AddCommand(ragEvalCmd)
 	rootCmd.AddCommand(metricsCmd)
@@ -122,4 +119,53 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", wrapError(err))
 		os.Exit(1)
 	}
+}
+
+// tryGetProjectSlug calls GET /api/sdk/project to look up the slug of the
+// project the configured API key is bound to. Used by `tavora init` to
+// fill the project name in tavora.jsonc when the user didn't pass
+// --project explicitly, instead of using a brittle directory-name
+// fallback. Returns "" on any failure (no api key, server
+// unreachable, request errored) — the caller falls back to the
+// directory-name path.
+func tryGetProjectSlug() string {
+	url, key := resolveAPIConfig()
+	if key == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c := tavora.NewClient(url, key)
+	project, err := c.GetProject(ctx)
+	if err != nil {
+		return ""
+	}
+	return project.Slug
+}
+
+// resolveAPIConfig returns (url, key) using the same precedence
+// PersistentPreRunE applies: flag > env var > ~/.tavora.yaml > default.
+// Empty key means "no credentials configured" — callers decide
+// whether that's fatal (most CLI commands) or a soft skip
+// (`tavora init` proceeds offline and just skips the cloud bind).
+func resolveAPIConfig() (url, key string) {
+	cfg := loadConfigFile()
+	url = flagURL
+	if url == "" {
+		url = os.Getenv("TAVORA_URL")
+	}
+	if url == "" && cfg != nil {
+		url = cfg.URL
+	}
+	if url == "" {
+		url = "http://localhost:8080"
+	}
+	key = flagAPIKey
+	if key == "" {
+		key = os.Getenv("TAVORA_API_KEY")
+	}
+	if key == "" && cfg != nil {
+		key = cfg.APIKey
+	}
+	return url, key
 }

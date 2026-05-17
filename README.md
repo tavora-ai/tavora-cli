@@ -1,14 +1,16 @@
-# tavora-tools
+# tavora-cli
 
 Developer tools for the [Tavora](https://tavora.ai) agentic intelligence
-platform. Two binaries, one module:
+platform. One binary, one module:
 
 | Binary | Purpose |
 |---|---|
-| [`tavora`](./cmd/tavora) | The user CLI — manage apps, agents, skills, documents, MCP servers, evals, schedules, and more from your terminal |
-| [`tavora-tui`](./cmd/tavora-tui) | An interactive terminal UI for chatting with a configured Tavora agent — Claude-Code-style |
+| [`tavora`](./cmd/tavora) | The user CLI — manage projects, agents, skills, documents, MCP servers, evals, schedules, and the interactive `tavora tui` chat surface. Folder-aware against a local `tavora/` project. |
 
-Both depend on the public Go SDK [`tavora-sdk-go`](https://github.com/tavora-ai/tavora-sdk-go).
+The previous standalone `tavora-tui` binary was retired 2026-05-17 —
+the same code now lives in `internal/tui/` and runs via `tavora tui`.
+
+Depends on the public Go SDK [`tavora-sdk-go`](https://github.com/tavora-ai/tavora-sdk-go).
 
 ## Code-first workflow (in flight)
 
@@ -87,7 +89,7 @@ The tools live here, not in the closed-source app repo, because:
 
 1. **Public surface coherence.** External customers see one library
    ([`tavora-sdk-go`](https://github.com/tavora-ai/tavora-sdk-go)) and
-   one tools repo (`tavora-tools`). Both public, both versioned
+   one tools repo (`tavora-cli`). Both public, both versioned
    independently.
 2. **Release decoupling.** Bumping the CLI or TUI doesn't require a
    server release. Bumping the server doesn't force a tools release.
@@ -96,50 +98,65 @@ The tools live here, not in the closed-source app repo, because:
 
 ## Install
 
-Pre-built binaries: see the [Releases](../../releases) page.
-
-From source:
+Three channels:
 
 ```sh
-git clone https://github.com/tavora-ai/tavora-tools
-cd tavora-tools
-go install ./cmd/tavora      # CLI
-go install ./cmd/tavora-tui  # TUI
+# npm — wraps the Go binary; postinstall fetches the right artifact
+npm i -g @tavora/cli            # or pnpm add -g, yarn global add
+
+# Homebrew (tap not yet published — coming alongside first tagged release)
+brew install tavora-ai/tap/tavora
+
+# From source
+git clone https://github.com/tavora-ai/tavora-cli
+cd tavora-cli
+go install ./cmd/tavora
 ```
+
+The npm package (`./npm/`) is a thin shim over the same Go binary —
+it downloads the platform-specific prebuilt on `postinstall`. See
+[`npm/README.md`](./npm/README.md) for the install flow + release
+pipeline (cross-compile via GOOS/GOARCH, gzip artifacts, attach to
+the GitHub Release, then `npm publish`).
 
 ## First-run
 
-Both binaries pick up `TAVORA_URL` and `TAVORA_API_KEY` from the
-environment. The TUI also persists them to `~/.config/tavora/agent-tui.json`
-after first interactive setup.
+The CLI prefers credentials in this order: command flags
+(`--api-key`, `--url`), env vars (`TAVORA_API_KEY`, `TAVORA_URL`),
+then the config file at `~/.tavora.yaml` written by `tavora login`.
 
 ```sh
-export TAVORA_URL=https://api.tavora.ai
-export TAVORA_API_KEY=tvr_...
-
-tavora app show
+tavora login                       # interactive — captures key + URL
+tavora project show
 tavora agents list
-tavora-tui
+tavora tui                         # interactive chat surface
 ```
+
+In folder mode (when cwd contains a `tavora/` project), `tavora tui`
+auto-syncs the folder, scopes the agent picker to local agents,
+defaults the session target to the dev draft, and downloads
+emitted assets into `<project>/.assets/<session-id>/`.
 
 ## Layout
 
 ```
-tavora-tools/
+tavora-cli/
 ├── cmd/
-│   ├── tavora/             # CLI (Cobra, resty)
-│   └── tavora-tui/         # TUI (Bubble Tea + bubbles + lipgloss)
-├── go.mod                  # single module; both bins build from here
+│   └── tavora/             # CLI (Cobra, resty)
+├── internal/
+│   ├── codefirst/          # source loader / validator / runs / scaffold
+│   └── tui/                # interactive TUI (Bubble Tea v2 + bubbles v2 + lipgloss v2)
+├── go.mod
 └── README.md
 ```
 
 ## Development
 
 ```sh
-go build ./...                          # build both
-go test ./...                           # run tests
-go run ./cmd/tavora app show      # CLI
-go run ./cmd/tavora-tui                 # TUI
+go build ./...                       # build the tavora binary
+go test ./...                        # run tests
+go run ./cmd/tavora project show
+go run ./cmd/tavora tui              # TUI from source
 ```
 
 ### Working against a local SDK checkout
@@ -149,7 +166,7 @@ the public registry. To iterate against unreleased SDK changes, add a
 local replace directive temporarily:
 
 ```sh
-# from tavora-tools/
+# from tavora-cli/
 go mod edit -replace github.com/tavora-ai/tavora-sdk-go=../tavora-sdk-go
 go mod tidy
 # … iterate …
