@@ -1,0 +1,47 @@
+# `tavora session list` is offline — reads tavora/.runs/ off disk
+# only. No backend involved (and no API key required), which makes
+# it a useful smoke for: the --dir flag override, the .md filter,
+# and the "no session logs yet" error path.
+#
+# The PersistentPreRunE in main.go has explicit early returns for
+# `tavora session …` so this should run cleanly with TAVORA_API_KEY
+# empty.
+
+# Missing dir → user-facing error string. (An *empty* dir is silent
+# success — only os.IsNotExist hits the error branch in
+# codefirst_session.go.)
+! tavora session list --dir $WORK/does-not-exist
+stderr 'no session logs yet'
+
+# Empty existing dir: silent success, no rows.
+mkdir runs-empty
+tavora session list --dir $WORK/runs-empty
+! stdout .
+! stderr .
+
+# Populated dir — three .md fixtures plus one non-.md file we
+# expect the lister to skip silently.
+mkdir runs-full
+cp script-fixtures/run1.md runs-full/2026-05-17T10-00-00-starter-aaa.md
+cp script-fixtures/run2.md runs-full/2026-05-17T11-00-00-starter-bbb.md
+cp script-fixtures/run3.md runs-full/2026-05-17T12-00-00-starter-ccc.md
+cp script-fixtures/note.txt runs-full/notes.txt
+
+tavora session list --dir $WORK/runs-full
+stdout '2026-05-17T10-00-00-starter-aaa.md'
+stdout '2026-05-17T11-00-00-starter-bbb.md'
+stdout '2026-05-17T12-00-00-starter-ccc.md'
+! stdout 'notes.txt'
+! stderr .
+
+-- script-fixtures/run1.md --
+# session aaa
+input: hello
+-- script-fixtures/run2.md --
+# session bbb
+input: hi
+-- script-fixtures/run3.md --
+# session ccc
+input: hey
+-- script-fixtures/note.txt --
+should be ignored — not a .md

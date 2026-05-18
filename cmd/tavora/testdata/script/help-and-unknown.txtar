@@ -1,0 +1,34 @@
+# Help and error-path pinning.
+#
+# These are CLI-shape contracts that don't go through the API at
+# all but are very easy to break with a cobra refactor:
+#   - `tavora --help` should list the verbs the user types most
+#   - unknown subcommands should fail with the standard cobra
+#     "unknown command" message and a non-zero exit
+#   - `tavora` with no args should print the same help as --help
+#
+# No env, no API key — these all run pre-PersistentPreRunE.
+
+tavora --help
+stdout 'Tavora CLI'
+stdout 'init'
+stdout 'dev'
+stdout 'deploy'
+stdout 'agents'
+stdout 'skills'
+! stderr .
+
+tavora help
+stdout 'Tavora CLI'
+stdout 'agents'
+! stderr .
+
+# Bare invocation prints help, exits 0 (cobra default for a root
+# command with no Run / RunE).
+tavora
+stdout 'Tavora CLI'
+! stderr .
+
+# Unknown subcommand → exit 1, error text on stderr.
+! tavora not-a-real-command
+stderr 'unknown command'

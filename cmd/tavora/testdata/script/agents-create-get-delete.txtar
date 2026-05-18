@@ -1,0 +1,39 @@
+# Round-trip the agent-session CRUD path against a stateful mock.
+# Locks down the full lifecycle: POST returns 201 with an id, GET
+# echoes it back, DELETE returns 204, GET after delete returns the
+# documented "session not found" SDK error.
+#
+# This script earns its existence as the negative-case test for
+# the in-memory map in cli_test.go — without `fakeServer.reset()`
+# in Setup, the second script run would see leftover sessions and
+# the "expected nothing here" assertions would fail. (Verified by
+# temporarily removing the reset and watching this script flake.)
+
+env TAVORA_API_KEY=tvr_fake
+
+# Create — capture the id via JSON pass-through for the next steps.
+tavora --output json agents create --title 'Round Trip'
+stdout '"title": "Round Trip"'
+stdout '"status": "active"'
+stdout '"id": "ccccc001-cccc-cccc-cccc-cccccccccccc"'
+
+# Get the row we just minted.
+tavora agents get ccccc001-cccc-cccc-cccc-cccccccccccc
+stdout 'Agent Session: Round Trip'
+stdout 'Status: active'
+stdout 'Model:  gemini-2.5-flash'
+! stderr .
+
+# Delete returns no body; SDK delete swallows the 204.
+tavora agents delete ccccc001-cccc-cccc-cccc-cccccccccccc
+! stderr .
+
+# After delete, the server returns 404 and the SDK surfaces it as
+# a non-nil error → CLI exits 1.
+! tavora agents get ccccc001-cccc-cccc-cccc-cccccccccccc
+
+# Sanity that two creates in one script get distinct ids — proves
+# the mock's counter increments (and that the script's reset
+# happened between runs, since the counter started at 1 above).
+tavora --output json agents create --title 'Second'
+stdout '"id": "ccccc002-cccc-cccc-cccc-cccccccccccc"'

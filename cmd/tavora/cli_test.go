@@ -31,10 +31,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -45,39 +47,87 @@ import (
 // fakeBackend is the per-package mock Tavora server. Routes are
 // added inline (no fixture files yet) so the canned shapes live
 // next to the tests that assert on them.
+//
+// State: stateless for read endpoints (same canned response each
+// call); the agents-CRUD path holds a tiny in-memory map so the
+// "create → get → delete → 404" round-trip is meaningful. The map
+// is guarded by mu and reset between TestCLI invocations via the
+// reset method (called from TestMain on each test entry — see
+// comments in TestCLI).
 type fakeBackend struct {
 	srv          *httptest.Server
 	requestCount atomic.Int64 // observable but unused for now; cheap diagnostic if a script starts flaking
+
+	mu        sync.Mutex
+	sessions  map[string]map[string]any // agent_session_id → session JSON
+	sessionID atomic.Int64              // monotonic, not derived from map length — so create-after-delete still increments
 }
 
 func newFakeBackend() *fakeBackend {
-	fb := &fakeBackend{}
+	fb := &fakeBackend{
+		sessions: make(map[string]map[string]any),
+	}
 	mux := http.NewServeMux()
 
-	// GET /api/sdk/project — used by `tavora init` to look up the
-	// project slug for tavora.jsonc when no --project flag is set.
-	// Returning a fixed slug lets init scripts assert on it.
-	mux.HandleFunc("/api/sdk/project", func(w http.ResponseWriter, r *http.Request) {
+	// GET /api/sdk/project — used by `tavora init` (for the project
+	// slug fallback) and `tavora project show`. Full Project shape
+	// per tavora-sdk-go/projects.go so the SDK decoder doesn't lose
+	// fields the human-format output reads (Name, Slug, Description,
+	// CreatedAt).
+	mux.HandleFunc("GET /api/sdk/project", func(w http.ResponseWriter, r *http.Request) {
 		fb.requestCount.Add(1)
 		writeJSON(w, http.StatusOK, map[string]any{
-			"id":   "11111111-1111-1111-1111-111111111111",
-			"slug": "fake-project",
-			"name": "Fake Project",
+			"id":          "11111111-1111-1111-1111-111111111111",
+			"team_id":     "22222222-2222-2222-2222-222222222222",
+			"slug":        "fake-project",
+			"name":        "Fake Project",
+			"description": "Mocked project for testscript",
+			"created_at":  time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC),
+			"updated_at":  time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC),
 		})
 	})
 
-	// GET /api/sdk/agents?limit=...&offset=... — used by
-	// `tavora agents list`. Two-row response keeps the table-format
-	// assertion meaningful (one row would also match an empty
-	// response stringification).
-	mux.HandleFunc("/api/sdk/agents", func(w http.ResponseWriter, r *http.Request) {
+	// GET /api/sdk/skills — `tavora skills list`. Two-row response
+	// (module + prompt) keeps the table check non-trivial AND lines
+	// up with the canonical post-code-first shape (skills are now
+	// authored under tavora/agents/<id>/skills/, types `module` or
+	// `prompt`).
+	mux.HandleFunc("GET /api/sdk/skills", func(w http.ResponseWriter, r *http.Request) {
 		fb.requestCount.Add(1)
-		// agents list uses GET only; everything else (POST create,
-		// DELETE) falls through to the catch-all 404 below.
-		if r.Method != http.MethodGet {
-			http.NotFound(w, r)
-			return
-		}
+		now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"skills": []map[string]any{
+				{
+					"id":          "33333333-3333-3333-3333-333333333333",
+					"project_id":  "11111111-1111-1111-1111-111111111111",
+					"name":        "__cf__/support/now",
+					"description": "current ISO timestamp",
+					"type":        "module",
+					"prompt":      "# now\nReturns the current time.",
+					"enabled":     true,
+					"created_at":  now,
+					"updated_at":  now,
+				},
+				{
+					"id":          "44444444-4444-4444-4444-444444444444",
+					"project_id":  "11111111-1111-1111-1111-111111111111",
+					"name":        "__cf__/support/style",
+					"description": "style guide",
+					"type":        "prompt",
+					"prompt":      "# Style\nWrite plainly.",
+					"enabled":     true,
+					"created_at":  now,
+					"updated_at":  now,
+				},
+			},
+		})
+	})
+
+	// GET /api/sdk/agents?limit=...&offset=... — `tavora agents
+	// list`. Stateless: same two rows each call. Two rows keep the
+	// table-format assertion non-trivial.
+	mux.HandleFunc("GET /api/sdk/agents", func(w http.ResponseWriter, r *http.Request) {
+		fb.requestCount.Add(1)
 		now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"sessions": []map[string]any{
@@ -103,6 +153,74 @@ func newFakeBackend() *fakeBackend {
 		})
 	})
 
+	// POST /api/sdk/agents — `tavora agents create`. Reads the
+	// title from the request body, mints a deterministic-ish id
+	// (sequence-based so two creates in one script get distinct
+	// ids), stores in the in-memory map, returns the row.
+	mux.HandleFunc("POST /api/sdk/agents", func(w http.ResponseWriter, r *http.Request) {
+		fb.requestCount.Add(1)
+		var input struct {
+			Title        string `json:"title"`
+			SystemPrompt string `json:"system_prompt"`
+			Model        string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&input)
+		if input.Model == "" {
+			input.Model = "gemini-2.5-flash"
+		}
+		now := time.Now().UTC()
+		id := fmt.Sprintf("ccccc%03d-cccc-cccc-cccc-cccccccccccc", fb.sessionID.Add(1))
+		fb.mu.Lock()
+		session := map[string]any{
+			"id":            id,
+			"project_id":    "11111111-1111-1111-1111-111111111111",
+			"title":         input.Title,
+			"system_prompt": input.SystemPrompt,
+			"status":        "active",
+			"model":         input.Model,
+			"created_at":    now,
+			"updated_at":    now,
+		}
+		fb.sessions[id] = session
+		fb.mu.Unlock()
+		writeJSON(w, http.StatusCreated, session)
+	})
+
+	// GET /api/sdk/agents/{id} — `tavora agents get`. The detail
+	// shape is {session, steps[]}; empty steps for the mock since
+	// none of the scripts assert on step content.
+	mux.HandleFunc("GET /api/sdk/agents/{id}", func(w http.ResponseWriter, r *http.Request) {
+		fb.requestCount.Add(1)
+		id := r.PathValue("id")
+		fb.mu.Lock()
+		session, ok := fb.sessions[id]
+		fb.mu.Unlock()
+		if !ok {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"session": session,
+			"steps":   []any{},
+		})
+	})
+
+	// DELETE /api/sdk/agents/{id} — `tavora agents delete`. 204
+	// on success matches the SDK contract (delete returns no body).
+	mux.HandleFunc("DELETE /api/sdk/agents/{id}", func(w http.ResponseWriter, r *http.Request) {
+		fb.requestCount.Add(1)
+		id := r.PathValue("id")
+		fb.mu.Lock()
+		_, ok := fb.sessions[id]
+		delete(fb.sessions, id)
+		fb.mu.Unlock()
+		if !ok {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
 	// Catch-all: unknown routes get a clear 404 so a script that
 	// accidentally hits an un-mocked endpoint fails loudly with the
 	// path included, rather than producing a confusing CLI error.
@@ -113,6 +231,18 @@ func newFakeBackend() *fakeBackend {
 
 	fb.srv = httptest.NewServer(mux)
 	return fb
+}
+
+// reset clears the per-test in-memory state. Called between
+// testscript scripts so one script's leftover sessions don't make
+// another script's "fresh project" assertions flake. Resets the
+// session id counter too so scripts asserting on specific ids
+// (`ccccc001…`) don't drift when run alongside others.
+func (fb *fakeBackend) reset() {
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+	fb.sessions = make(map[string]map[string]any)
+	fb.sessionID.Store(0)
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -148,8 +278,10 @@ func TestCLI(t *testing.T) {
 		Dir: "testdata/script",
 		// Setup runs per-script, before any commands. Use it to
 		// pin env so tests don't see the developer's real
-		// credentials/config.
+		// credentials/config, and to reset any per-script backend
+		// state from the previous script.
 		Setup: func(env *testscript.Env) error {
+			fakeServer.reset()
 			home := env.WorkDir + "/home"
 			if err := os.MkdirAll(home, 0o755); err != nil {
 				return err

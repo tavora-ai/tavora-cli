@@ -47,7 +47,7 @@ Run 'tavora login' to write credentials to the config file.`,
 		switch cmd.Name() {
 		case "help", "completion", "version":
 			return nil
-		case "init", "login", "show", "tui":
+		case "init", "login", "tui":
 			// "tui" manages its own credentials (via internal/tui's
 			// folder→~/.tavora.yaml→env→setup chain), so it
 			// shouldn't fail here just because no API key was on the
@@ -58,11 +58,20 @@ Run 'tavora login' to write credentials to the config file.`,
 			// API key required. `latest` is the subcommand name.
 			return nil
 		}
-		// `tavora session get <id>` and `… list` also run offline;
-		// detect them by parent rather than name to avoid colliding
-		// with other CLIs that have unrelated `get`/`list` verbs.
-		if cmd.Parent() != nil && cmd.Parent().Name() == "session" {
-			return nil
+		// Subcommands with offline-only local-disk paths, scoped by
+		// parent to avoid colliding with same-named commands that DO
+		// need an API client. Two cases today:
+		//   `tavora session get <id>` / `… list`
+		//   `tavora config show <agent>` (reads tavora/ off disk)
+		// Past bug: a bare `case "show"` in the switch above also
+		// matched `tavora project show`, which DOES need the client
+		// and was nil-deref'ing post-PreRun. The parent-keyed form
+		// keeps the skip narrow to where it's actually safe.
+		if cmd.Parent() != nil {
+			switch cmd.Parent().Name() {
+			case "session", "config":
+				return nil
+			}
 		}
 
 		url, key := resolveAPIConfig()

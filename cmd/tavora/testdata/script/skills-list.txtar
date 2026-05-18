@@ -1,0 +1,22 @@
+# `tavora skills list` against the mock backend's two-row response.
+# Skills are now authored exclusively by source-sync; this command
+# is the inspection surface. The wire shape (name with the __cf__/
+# namespace prefix, type, enabled) is what the SDK + the table
+# formatter rely on.
+
+env TAVORA_API_KEY=tvr_fake
+
+tavora skills list
+stdout '__cf__/support/now'
+stdout '__cf__/support/style'
+stdout 'module'
+stdout 'prompt'
+! stderr .
+
+tavora --output json skills list
+stdout '"name": "__cf__/support/now"'
+stdout '"type": "module"'
+stdout '"name": "__cf__/support/style"'
+stdout '"type": "prompt"'
+stdout '"enabled": true'
+! stderr .
