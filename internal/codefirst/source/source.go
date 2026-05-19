@@ -108,20 +108,24 @@ type Eval struct {
 
 // Skill is a resolved skill folder. Every skill has a required
 // skill.md (the LLM-facing prompt) and an optional main.js (the
-// require()-able sandbox module). Folder name = skill name.
+// require()-able sandbox module). An optional main.d.ts ships
+// TypeScript signatures the server feeds into the system prompt so
+// the LLM emits calls that match the real shape; IDEs already pick
+// up the same .d.ts for autocomplete on the .js source.
 //
 // SkillKind is derived from whether main.js exists:
 //
 //	skill.md only          → Kind == SkillPrompt
 //	skill.md + main.js     → Kind == SkillModule (skill.md still ships as the prompt)
 type Skill struct {
-	Kind       SkillKind
-	BindingRaw string // the path as written in agent.jsonc (the folder)
-	Name       string // folder basename, e.g. "style"
-	Path       string // absolute resolved folder path
-	RelPath    string // folder path relative to project root
-	PromptPath string // absolute path to skill.md
-	ModulePath string // absolute path to main.js, "" when none
+	Kind        SkillKind
+	BindingRaw  string // the path as written in agent.jsonc (the folder)
+	Name        string // folder basename, e.g. "style"
+	Path        string // absolute resolved folder path
+	RelPath     string // folder path relative to project root
+	PromptPath  string // absolute path to skill.md
+	ModulePath  string // absolute path to main.js, "" when none
+	TypedefPath string // absolute path to main.d.ts, "" when none
 }
 
 type SkillKind string
@@ -361,13 +365,21 @@ func loadAgent(root, agentConfigPath string) (*Agent, []Issue) {
 				continue
 			}
 			a.Skills = append(a.Skills, *skill)
-			// Record both files in SourceBytes so the manifest carries them.
+			// Record skill files in SourceBytes so the manifest carries
+			// them. main.d.ts is optional; when present the server feeds
+			// its verbatim contents into the system prompt under the
+			// skill's section.
 			if b, err := os.ReadFile(skill.PromptPath); err == nil {
 				a.SourceBytes[relTo(root, skill.PromptPath)] = b
 			}
 			if skill.ModulePath != "" {
 				if b, err := os.ReadFile(skill.ModulePath); err == nil {
 					a.SourceBytes[relTo(root, skill.ModulePath)] = b
+				}
+			}
+			if skill.TypedefPath != "" {
+				if b, err := os.ReadFile(skill.TypedefPath); err == nil {
+					a.SourceBytes[relTo(root, skill.TypedefPath)] = b
 				}
 			}
 		}
@@ -462,6 +474,7 @@ func loadSkillFolder(root, agentConfigPath, binding, folder string) (*Skill, []I
 	name := filepath.Base(folder)
 	promptPath := filepath.Join(folder, "skill.md")
 	modulePath := filepath.Join(folder, "main.js")
+	typedefPath := filepath.Join(folder, "main.d.ts")
 
 	if _, err := os.Stat(promptPath); err != nil {
 		issues = append(issues, Issue{
@@ -477,6 +490,10 @@ func loadSkillFolder(root, agentConfigPath, binding, folder string) (*Skill, []I
 	if _, err := os.Stat(modulePath); err == nil {
 		kind = SkillModule
 		hasModule = true
+	}
+	hasTypedef := false
+	if _, err := os.Stat(typedefPath); err == nil {
+		hasTypedef = true
 	}
 
 	// Warn on any unexpected files so the user knows they're not
@@ -494,7 +511,7 @@ func loadSkillFolder(root, agentConfigPath, binding, folder string) (*Skill, []I
 			continue
 		}
 		switch e.Name() {
-		case "skill.md", "main.js":
+		case "skill.md", "main.js", "main.d.ts":
 			continue
 		case ".DS_Store":
 			continue
@@ -506,7 +523,7 @@ func loadSkillFolder(root, agentConfigPath, binding, folder string) (*Skill, []I
 			File:    relTo(root, agentConfigPath),
 			Code:    "extra-skill-file",
 			Message: fmt.Sprintf("file %q inside skill %q is not bundled", e.Name(), name),
-			Hint:    "only skill.md and main.js are recognized. Rename to main.js (entry module), or remove.",
+			Hint:    "recognized files: skill.md, main.js, main.d.ts. Rename to one of those, or remove.",
 		})
 	}
 
@@ -520,6 +537,9 @@ func loadSkillFolder(root, agentConfigPath, binding, folder string) (*Skill, []I
 	}
 	if hasModule {
 		skill.ModulePath = modulePath
+	}
+	if hasTypedef {
+		skill.TypedefPath = typedefPath
 	}
 	return skill, issues
 }

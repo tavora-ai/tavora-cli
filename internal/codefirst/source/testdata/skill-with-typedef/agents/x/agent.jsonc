@@ -1,0 +1,6 @@
+{
+  "id": "x",
+  "name": "X",
+  "model": { "provider": "gemini", "name": "gemini-2.5-flash" },
+  "skills": ["./skills/board/"]
+}

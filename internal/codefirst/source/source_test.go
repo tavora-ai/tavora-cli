@@ -155,6 +155,37 @@ func TestLoad_ExtraSkillFile(t *testing.T) {
 	assertHasIssueCode(t, p, "extra-skill-file")
 }
 
+// TestLoad_SkillWithTypedef pins the .d.ts contract: main.d.ts is
+// a recognized skill file (no extra-skill-file warning), its bytes
+// land in SourceBytes so the server can ingest them, and the path
+// is recorded on the Skill struct so consumers know it's present.
+func TestLoad_SkillWithTypedef(t *testing.T) {
+	p, err := source.Load(filepath.Join("testdata", "skill-with-typedef"))
+	require.NoError(t, err)
+	require.Len(t, p.Agents, 1)
+
+	// No extra-skill-file warning — main.d.ts is allowlisted.
+	for _, i := range p.Issues {
+		assert.NotEqual(t, "extra-skill-file", i.Code,
+			"main.d.ts must not trigger extra-skill-file: %+v", i)
+	}
+
+	a := p.Agents[0]
+	require.Len(t, a.Skills, 1)
+	assert.NotEmpty(t, a.Skills[0].TypedefPath, "TypedefPath must point at main.d.ts")
+
+	// SourceBytes carries main.d.ts so the server's source-sync can
+	// ingest typedef_dts onto the skills row.
+	found := false
+	for path := range a.SourceBytes {
+		if filepath.Base(path) == "main.d.ts" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "main.d.ts must be bundled in SourceBytes")
+}
+
 // TestLoad_MissingManifest — pointing Load at a directory without
 // a tavora.jsonc must return an error (not just a Project with
 // issues). This is the one case where the user can't be expected
