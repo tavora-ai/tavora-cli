@@ -77,16 +77,19 @@ var secretListCmd = &cobra.Command{
 		}
 		// Filter to secrets only — the env list shows everything;
 		// `secret list` answers the narrower question.
-		var secrets []string
-		var updated []string
+		filtered := entries[:0:0]
 		for _, e := range entries {
-			if !e.IsSecret {
-				continue
+			if e.IsSecret {
+				filtered = append(filtered, e)
 			}
-			secrets = append(secrets, e.Key)
-			updated = append(updated, e.UpdatedAt)
 		}
-		if len(secrets) == 0 {
+		if isJSON() {
+			return printJSON(map[string]any{
+				"deployment": slug,
+				"entries":    filtered,
+			})
+		}
+		if len(filtered) == 0 {
 			fmt.Fprintf(os.Stderr, "No secrets on deployment %q yet.\n\n", slug)
 			fmt.Fprintln(os.Stderr, "Add one with:")
 			fmt.Fprintln(os.Stderr, "  tavora secret put <KEY> <value>")
@@ -94,8 +97,8 @@ var secretListCmd = &cobra.Command{
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "KEY\tUPDATED")
-		for i, k := range secrets {
-			fmt.Fprintf(w, "%s\t%s\n", k, updated[i])
+		for _, e := range filtered {
+			fmt.Fprintf(w, "%s\t%s\n", e.Key, e.UpdatedAt)
 		}
 		return w.Flush()
 	},

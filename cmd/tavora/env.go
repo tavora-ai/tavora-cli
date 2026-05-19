@@ -80,6 +80,15 @@ var envListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if isJSON() {
+			// JSON output always includes the (possibly empty) array
+			// so scripts can iterate without special-casing "no
+			// entries." Same shape regardless of length.
+			return printJSON(map[string]any{
+				"deployment": slug,
+				"entries":    entries,
+			})
+		}
 		if len(entries) == 0 {
 			fmt.Fprintf(os.Stderr, "No entries on deployment %q yet.\n\n", slug)
 			fmt.Fprintln(os.Stderr, "Add one with:")
@@ -141,6 +150,11 @@ var envDeleteCmd = &cobra.Command{
 // `secret put`; the caller fixes is_secret. Extracted so the two
 // command trees stay thin wrappers — the intent flag is the only
 // thing they decide.
+//
+// JSON output prints the redacted entry returned by the server
+// (key + is_secret + timestamps; never the value). Text output is
+// a one-line confirmation on stderr so $(tavora env put …) capture
+// is empty.
 func putDeploymentEnv(cmd *cobra.Command, args []string, isSecret bool) error {
 	if client == nil {
 		return errors.New("no API client configured — run `tavora login`")
@@ -150,17 +164,30 @@ func putDeploymentEnv(cmd *cobra.Command, args []string, isSecret bool) error {
 		return err
 	}
 	key, value := args[0], args[1]
-	_, err = client.PutDeploymentEnv(cmd.Context(), slug, key, tavora.SetDeploymentEnvInput{
+	red, err := client.PutDeploymentEnv(cmd.Context(), slug, key, tavora.SetDeploymentEnvInput{
 		Value:    value,
 		IsSecret: isSecret,
 	})
 	if err != nil {
 		return err
 	}
+	if isJSON() {
+		return printJSON(red)
+	}
 	fmt.Fprintf(os.Stderr, "set %s.%s on deployment %s\n", kindLabel(isSecret), key, slug)
 	return nil
 }
 
+// getDeploymentEnv prints one entry's value.
+//
+// Text output: just the plaintext, no newline — matches `git config
+// --get` so shell substitution captures clean. The whole point of
+// `tavora env get` is `$(tavora env get FOO)`.
+//
+// JSON output: the full DeploymentEnvValue (key + value +
+// is_secret) so scripted callers can branch on the kind. The value
+// is plaintext in both modes — the only redaction-aware mode here
+// is the text mode's "no newline" convention.
 func getDeploymentEnv(cmd *cobra.Command, args []string) error {
 	if client == nil {
 		return errors.New("no API client configured — run `tavora login`")
@@ -173,12 +200,18 @@ func getDeploymentEnv(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	// No newline — the caller composes that. Matches `git config
-	// --get` and other "print one value" UNIX conventions.
+	if isJSON() {
+		return printJSON(res)
+	}
 	_, _ = os.Stdout.WriteString(res.Value)
 	return nil
 }
 
+// deleteDeploymentEnv removes one entry.
+//
+// JSON output: a tiny ack object so scripts can check status
+// without grepping stderr. Text output: the same one-line stderr
+// confirmation as put.
 func deleteDeploymentEnv(cmd *cobra.Command, args []string) error {
 	if client == nil {
 		return errors.New("no API client configured — run `tavora login`")
@@ -190,6 +223,13 @@ func deleteDeploymentEnv(cmd *cobra.Command, args []string) error {
 	key := args[0]
 	if err := client.DeleteDeploymentEnv(cmd.Context(), slug, key); err != nil {
 		return err
+	}
+	if isJSON() {
+		return printJSON(map[string]any{
+			"deployment": slug,
+			"key":        key,
+			"deleted":    true,
+		})
 	}
 	fmt.Fprintf(os.Stderr, "removed %s from deployment %s\n", key, slug)
 	return nil
