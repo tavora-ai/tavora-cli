@@ -109,6 +109,7 @@ func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(loginCmd)
 	rootCmd.AddCommand(envCmd)
+	rootCmd.AddCommand(secretCmd)
 	rootCmd.AddCommand(appCmd)
 	rootCmd.AddCommand(storesCmd)
 	rootCmd.AddCommand(documentsCmd)
